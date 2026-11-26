@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VBA-Editor</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="form-hidden">
+<header class="topbar">
+  <h1>VBA-Editor <span class="badge">Vorschau – Phase 2</span></h1>
+  <div class="toolbar">
+    <label class="startsel">Start-Sub
+      <select id="entry" title="Welche Sub soll gestartet werden?"></select>
+    </label>
+    <button id="btnRun" class="primary" title="Programm ausführen (F5)">▶ Ausführen</button>
+    <button id="btnStop" disabled title="Laufendes Programm abbrechen">■ Stoppen</button>
+    <button id="btnClear" title="Konsole leeren">Konsole leeren</button>
+    <button id="btnForm" aria-pressed="false" title="Formular ein- oder ausblenden">▭ Formular</button>
+    <button id="btnNew" title="Neues Programm mit leerem Grundgerüst">Neu</button>
+    <button id="btnOpen" title="Programm (.bas oder .txt) öffnen">Öffnen</button>
+    <button id="btnSave" title="Programm und Formular als .bas-Datei speichern">Speichern</button>
+    <input id="fileInput" type="file" accept=".bas,.txt,.cls,text/plain" hidden>
+    <button id="btnHelp" class="help-btn" title="Hilfe und Beispiele (F1)" aria-expanded="false" aria-controls="helpPanel">? Hilfe</button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab active" data-pane="editorPane" role="tab">Code</button>
+  <button class="tab" data-pane="formPane" role="tab">Formular</button>
+  <button class="tab" data-pane="consolePane" role="tab">Konsole</button>
+</nav>
+
+<main class="panes">
+  <section id="editorPane" class="pane active">
+    <div class="editor">
+      <pre id="gutter" class="gutter" aria-hidden="true"></pre>
+      <div class="code-wrap">
+        <pre id="hl" class="hl" aria-hidden="true"></pre>
+        <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="VBA-Code"></textarea>
+      </div>
+    </div>
+  </section>
+  <div class="side">
+    <section id="formPane" class="pane">
+      <div class="form-head">
+        <span class="pane-title">Formular</span>
+        <div class="seg" role="group" aria-label="Ansicht">
+          <button id="btnDesign" class="seg-btn active" aria-pressed="true">Entwurf</button>
+          <button id="btnFormView" class="seg-btn" aria-pressed="false">Formularansicht</button>
+        </div>
+      </div>
+      <div id="toolbox" class="toolbox">
+        <button data-add="textbox" data-variant="input" title="Textfeld für Eingaben, Name beginnt mit E_">+ Eingabefeld (E_)</button>
+        <button data-add="textbox" data-variant="output" title="Textfeld für Ausgaben, Name beginnt mit A_">+ Ausgabefeld (A_)</button>
+        <button data-add="label">+ Bezeichnung</button>
+        <button data-add="button">+ Schaltfläche</button>
+        <button data-add="optiongroup">+ Optionsgruppe</button>
+      </div>
+      <div class="form-scroll"><div id="formCanvas" class="form-canvas"></div></div>
+      <div id="formProps" class="props"></div>
+    </section>
+    <section id="consolePane" class="pane">
+      <div class="console-head">Direktfenster (Debug.Print)</div>
+      <pre id="console" class="console" aria-live="polite"></pre>
+    </section>
+  </div>
+  <aside id="helpPanel" class="help hidden" aria-label="Hilfe">
+    <div class="help-head">
+      <h2>Hilfe</h2>
+      <button id="btnHelpClose" title="Hilfe schließen">✕ Schließen</button>
+    </div>
+    <nav id="helpToc" class="help-toc"></nav>
+    <div id="helpBody" class="help-body"></div>
+  </aside>
+</main>
+
+
+<div id="toast" class="toast hidden" role="status">
+  <span id="toastText"></span>
+  <button id="toastUndo">Rückgängig</button>
+</div>
+
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="dialog">
+    <div class="dialog-title" id="modalTitle"></div>
+    <div class="dialog-body">
+      <div class="dialog-icon" id="modalIcon"></div>
+      <div class="dialog-text" id="modalText"></div>
+    </div>
+    <div class="dialog-note hidden" id="modalNote"></div>
+    <input id="modalInput" class="hidden" type="text" autocomplete="off">
+    <div class="dialog-buttons" id="modalButtons"></div>
+  </div>
+</div>
+
+<script src="src/errors.js"></script>
+<script src="src/tokenizer.js"></script>
+<script src="src/parser.js"></script>
+<script src="src/values.js"></script>
+<script src="src/builtins.js"></script>
+<script src="src/forms.js"></script>
+<script src="src/analyzer.js"></script>
+<script src="src/interpreter.js"></script>
+<script src="src/vba.js"></script>
+<script src="js/help.js"></script>
+<script src="js/designer.js"></script>
+<script src="js/highlight.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

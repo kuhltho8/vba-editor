@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VBA-Interpreter – Tests</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 16px; background: #fff; color: #1d2430; }
+  @media (prefers-color-scheme: dark) { body { background: #17191d; color: #e4e6ea; } }
+  .ok { color: #1a7f37; } .fail { color: #c62828; white-space: pre-wrap; font-family: monospace; }
+  #sum { font-weight: 600; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<h1>Interpreter-Tests</h1>
+<div id="sum">Tests laufen …</div>
+<div id="list"></div>
+<script src="../src/errors.js"></script>
+<script src="../src/tokenizer.js"></script>
+<script src="../src/parser.js"></script>
+<script src="../src/values.js"></script>
+<script src="../src/builtins.js"></script>
+<script src="../src/forms.js"></script>
+<script src="../src/analyzer.js"></script>
+<script src="../src/interpreter.js"></script>
+<script src="../src/vba.js"></script>
+<script src="cases.js"></script>
+<script>
+(async () => {
+  const list = document.getElementById('list');
+  let ok = 0;
+  for (const c of VBATests.cases) {
+    const r = await VBATests.runCase(VBA, c);
+    const div = document.createElement('div');
+    div.className = r.ok ? 'ok' : 'fail';
+    div.textContent = (r.ok ? '✓ ' : '✗ ') + c.name + (r.ok ? '' : '\n  ' + r.details);
+    list.appendChild(div);
+    if (r.ok) ok++;
+  }
+  document.getElementById('sum').textContent = `${ok} von ${VBATests.cases.length} Tests bestanden.`;
+})();
+</script>
+</body>
+</html>
