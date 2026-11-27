@@ -16,10 +16,16 @@ const { TOPICS } = require(path.join(__dirname, '..', 'js', 'help.js'));
         const r = VBA.createRun(prog, { print: (l) => out.push(l), msgBox: async () => 1 }, { controls: rt.adapters() });
         r.open();
         if (r.has('Form_Load')) await r.invoke('Form_Load');
-        rt.userInput('E_Zahl1', '2,5'); rt.userInput('E_Zahl2', '4'); rt.userSelect('E_Rechenart', 3);
-        await r.invoke('btnBerechnen_Click');
-        out.push('A_Ergebnis = ' + rt.displayText('A_Ergebnis'));
-        if (rt.displayText('A_Ergebnis') !== '10') throw new Error('falsches Ergebnis');
+        const tc = t.test || {};
+        for (const [n, v] of Object.entries(tc.input || {})) rt.userInput(n, v);
+        for (const [n, v] of Object.entries(tc.select || {})) rt.userSelect(n, v);
+        if (tc.click) await r.invoke(tc.click + '_Click');
+        for (const [n, want] of Object.entries(tc.expect || {})) {
+          const st = rt.get(n);
+          const got = st.items ? st.items.join('|') : rt.displayText(n);
+          out.push(n + ' = ' + got);
+          if (got !== want) throw new Error(`falsches Ergebnis in ${n}: ${got}`);
+        }
         console.log(`✓ ${t.title}\n    ${out.join('\n    ')}`);
         continue;
       }

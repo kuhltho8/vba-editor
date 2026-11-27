@@ -102,13 +102,14 @@
     if (t === '') return NaN;
     const hex = /^&H([0-9A-F]+)$/i.exec(t);
     if (hex) return parseInt(hex[1], 16);
-    if (t.includes('.') && t.includes(',')) {
-      if (t.lastIndexOf(',') > t.lastIndexOf('.')) t = t.replace(/\./g, '').replace(',', '.');
-      else t = t.replace(/,/g, '');
-    } else if (t.includes(',')) {
-      if ((t.match(/,/g) || []).length > 1) return NaN;
-      t = t.replace(',', '.');
-    }
+    // Deutsche Ländereinstellung wie in Access: Komma = Dezimaltrennzeichen,
+    // Punkt = Tausendertrennzeichen (wird ignoriert): "3.5" → 35, "1.000" → 1000, "1.000,5" → 1000,5
+    if ((t.match(/,/g) || []).length > 1) return NaN;
+    const comma = t.indexOf(',');
+    if (comma !== -1 && t.indexOf('.', comma) !== -1) return NaN;
+    const mant = /^[^eE]*/.exec(t)[0];
+    t = mant.replace(/\./g, '').replace(',', '.') + t.slice(mant.length);
+    if (/^[+-]?\.?$/.test(t)) return NaN;
     if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(t)) return NaN;
     return parseFloat(t);
   }

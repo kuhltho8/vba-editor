@@ -15,7 +15,37 @@
   else { root.VBA = root.VBA || {}; Object.assign(root.VBA, mod); }
 })(typeof self !== 'undefined' ? self : this, function (V) {
   'use strict';
-  const { syntaxError, BUILTINS, CONSTANTS, SPECIAL_VALUES, ASYNC_BUILTINS, VbaDate, parseDateString, CONTROL_PROPS, READ_ONLY, KIND_NAMES } = V;
+  const { syntaxError, BUILTINS, CONSTANTS, SPECIAL_VALUES, ASYNC_BUILTINS, VbaDate, parseDateString, CONTROL_PROPS, READ_ONLY, MEMBER_ARGS, KIND_NAMES } = V;
+
+  // Objekte, die es ohne Formular-Steuerelement gibt
+  const SPECIAL_OBJECTS = {
+    me: {
+      name: 'Me', hint: 'Steuerelemente sprichst du direkt mit ihrem Namen an.',
+      members: {
+        caption: { kind: 'prop' }, refresh: { kind: 'method' }, requery: { kind: 'method' },
+        recalc: { kind: 'method' }, repaint: { kind: 'method' }
+      }
+    },
+    err: {
+      name: 'Err',
+      members: {
+        number: { kind: 'prop' }, description: { kind: 'prop' }, source: { kind: 'prop' },
+        clear: { kind: 'method' }, raise: { kind: 'method', args: [1, 3] }
+      }
+    },
+    docmd: {
+      name: 'DoCmd', hint: 'Im Editor gibt es nur DoCmd.Close (Formular schließen).',
+      members: { close: { kind: 'method', args: [0, 3] }, beep: { kind: 'method' } },
+      unsupported: {
+        openform: 'DoCmd.OpenForm gibt es hier nicht – der Editor hat nur ein Formular.',
+        openreport: 'DoCmd.OpenReport gibt es hier nicht – Berichte werden nicht unterstützt.',
+        runsql: 'DoCmd.RunSQL gibt es hier nicht – der Editor hat keine Datenbank.',
+        openquery: 'DoCmd.OpenQuery gibt es hier nicht – der Editor hat keine Datenbank.',
+        opentable: 'DoCmd.OpenTable gibt es hier nicht – der Editor hat keine Datenbank.',
+        quit: 'DoCmd.Quit gibt es hier nicht. Zum Schließen des Formulars: DoCmd.Close.'
+      }
+    }
+  };
 
   function analyze(program) {
     const procs = program.procs;
@@ -45,6 +75,7 @@
 
     function member(node, mode) {
       const c = controls.get(node.objLower);
+      if (!c && SPECIAL_OBJECTS[node.objLower]) return specialMember(node, mode);
       if (!c) {
         if (node.objLower === 'debug') throw syntaxError(`Debug.${node.prop} wird nicht unterstützt – verwende Debug.Print als eigene Anweisung.`, node.line);
         throw syntaxError(controls.size === 0
@@ -60,9 +91,118 @@
       if (mode === 'write' && READ_ONLY.has(node.propLower)) {
         throw syntaxError(`Die Eigenschaft '${node.prop}' ist schreibgeschützt.`, node.line);
       }
+      const range = MEMBER_ARGS[node.propLower] || [0, 0];
+      const given = node.args ? node.args.length : 0;
+      if (given < range[0]) {
+        throw syntaxError(`Argument nicht optional: '${node.prop}' braucht mindestens ${range[0]} Argument(e)` +
+          (node.propLower === 'additem' ? `, z. B. ${c.name}.AddItem "Text".` : '.'), node.line);
+      }
+      if (given > range[1]) throw syntaxError(`Falsche Anzahl an Argumenten für '${node.prop}': höchstens ${range[1]} erlaubt, ${given} angegeben.`, node.line);
+      let async = false;
+      (node.args || []).forEach((a, i) => {
+        if (!a) { if (i < range[0]) throw syntaxError(`Argument nicht optional: '${node.prop}'.`, node.line); return; }
+        async = expr(a) || async;
+      });
+      node.async = async;
+      return async;
     }
 
-    let scope = null; // { proc, declared:Set, consts:Set }
+    // Me (Formular), Err und DoCmd
+    function specialMember(node, mode) {
+      const obj = SPECIAL_OBJECTS[node.objLower];
+      const p = node.propLower;
+      if (obj.unsupported && obj.unsupported[p]) throw syntaxError(obj.unsupported[p], node.line);
+      const def = obj.members[p];
+      if (!def) {
+        throw syntaxError(`Methode oder Datenobjekt nicht gefunden: '${obj.name}.${node.prop}' gibt es hier nicht.` +
+          (obj.hint ? ' ' + obj.hint : ''), node.line);
+      }
+      const isMethod = def.kind === 'method';
+      if (mode === 'call' && !isMethod) throw syntaxError(`Ungültige Verwendung einer Eigenschaft: '${obj.name}.${node.prop}' ist keine Methode.`, node.line);
+      if (mode !== 'call' && isMethod && !(mode === 'read' && def.returns)) throw syntaxError(`'${obj.name}.${node.prop}' ist eine Methode und liefert keinen Wert.`, node.line);
+      if (mode === 'write' && def.readOnly) throw syntaxError(`Die Eigenschaft '${obj.name}.${node.prop}' ist schreibgeschützt.`, node.line);
+      const range = def.args || [0, 0];
+      const given = node.args ? node.args.length : 0;
+      if (given < range[0]) throw syntaxError(`Argument nicht optional: '${obj.name}.${node.prop}' braucht mindestens ${range[0]} Argument(e).`, node.line);
+      if (given > range[1]) throw syntaxError(`Falsche Anzahl an Argumenten für '${obj.name}.${node.prop}': höchstens ${range[1]} erlaubt.`, node.line);
+      let async = false;
+      for (const a of node.args || []) if (a) async = expr(a) || async;
+      node.special = node.objLower;
+      node.async = async;
+      return async;
+    }
+
+    let scope = null; // { proc, declared:Set, consts:Set, types:Map }
+
+    // ---------- statische Datentypen (für Überlauf wie in Access: 200 * 200) ----------
+    const moduleTypes = new Map();
+    for (const d of program.moduleDecls) moduleTypes.set(d.lower, d.isArray ? 'array' : (d.varType || 'variant'));
+    const INT_TYPES = { byte: 1, boolean: 2, integer: 2, long: 3 };
+    const BUILTIN_TYPES = {
+      cint: 'integer', clng: 'long', cbyte: 'byte', cbool: 'boolean', cdbl: 'double', csng: 'single', ccur: 'currency',
+      cstr: 'string', len: 'long', asc: 'integer', ascw: 'integer', ubound: 'long', lbound: 'long', sgn: 'integer',
+      year: 'integer', month: 'integer', day: 'integer', hour: 'integer', minute: 'integer', second: 'integer', weekday: 'integer'
+    };
+    function varType(lower) {
+      if (controls.has(lower)) return 'variant';
+      if (scope.types && scope.types.has(lower)) return scope.types.get(lower);
+      if (scope.declared.has(lower)) return 'variant';
+      return moduleTypes.get(lower) || 'variant';
+    }
+    function staticType(node) {
+      if (!node) return 'variant';
+      switch (node.type) {
+        case 'Num':
+          if (node.numType) return node.numType;
+          if (Number.isInteger(node.value)) return Math.abs(node.value) <= 32767 ? 'integer' : (Math.abs(node.value) <= 2147483647 ? 'long' : 'double');
+          return 'double';
+        case 'Str': return 'string';
+        case 'Bool': return 'boolean';
+        case 'Paren': return staticType(node.expr);
+        case 'Ident': {
+          const t = varType(node.lower);
+          if (t === 'variant' && procs[node.lower] && procs[node.lower].kind === 'function' && !isVar(node.lower)) return procs[node.lower].returnType;
+          return t;
+        }
+        case 'CallOrIndex': {
+          if (isVar(node.lower) && !(scope.proc && scope.proc.lower === node.lower)) {
+            const t = varType(node.lower);
+            return t === 'array' ? 'variant' : t; // Element eines Arrays
+          }
+          if (procs[node.lower]) return procs[node.lower].kind === 'function' ? procs[node.lower].returnType : 'variant';
+          if (BUILTIN_TYPES[node.lower]) return BUILTIN_TYPES[node.lower];
+          if ((node.lower === 'int' || node.lower === 'fix' || node.lower === 'abs') && node.args.length === 1) return staticType(node.args[0]);
+          return 'variant';
+        }
+        case 'Unary': return node.op === '-' ? staticType(node.operand) : (node.ovf || 'variant');
+        case 'Bin': return node.stype || 'variant';
+        default: return 'variant';
+      }
+    }
+    // Ergebnistyp ganzzahliger Rechnungen: Byte < Integer < Long (Boolean zählt als Integer)
+    function intResult(a, b) {
+      if (!(a in INT_TYPES) || !(b in INT_TYPES)) return null;
+      if (a === 'byte' && b === 'byte') return 'byte';
+      return Math.max(INT_TYPES[a], INT_TYPES[b], 2) === 3 ? 'long' : 'integer';
+    }
+    function markOverflow(node) {
+      if (node.type === 'Bin') {
+        const a = staticType(node.left), b = staticType(node.right);
+        if (['+', '-', '*', '\\', 'mod'].includes(node.op)) {
+          const r = intResult(a, b);
+          if (r) { node.ovf = r; node.stype = r; return; }
+          if ((node.op === '\\' || node.op === 'mod')) node.stype = (a === 'variant' || b === 'variant') ? 'variant' : 'long';
+          else if (a === 'double' || b === 'double' || a === 'single' || b === 'single') node.stype = (a === 'string' || b === 'string' || a === 'variant' || b === 'variant') ? 'variant' : 'double';
+        } else if (node.op === '/' || node.op === '^') {
+          node.stype = 'double';
+        } else if (node.op === '&') node.stype = 'string';
+      } else if (node.type === 'Unary' && node.op === '-') {
+        const t = staticType(node.operand);
+        if (t in INT_TYPES && t !== 'boolean') node.ovf = t === 'byte' ? 'integer' : t;
+      }
+    }
+    // Len(i) bei Integer & Co. liefert wie in Access die Größe in Bytes
+    const BYTE_SIZES = { byte: 1, boolean: 2, integer: 2, long: 4, single: 4, double: 8, currency: 8, date: 8 };
 
     const isVar = (lower) => scope.declared.has(lower) || moduleNames.has(lower);
     const isConst = (lower) => scope.consts.has(lower) || (!scope.declared.has(lower) && moduleConsts.has(lower));
@@ -112,10 +252,12 @@
           break;
         }
         case 'Paren': async = expr(node.expr); break;
-        case 'Unary': async = expr(node.operand); break;
-        case 'Bin': async = expr(node.left); async = expr(node.right) || async; break;
-        case 'Ident': meCheck(node); async = ident(node); break;
-        case 'Member': member(node, 'read'); break;
+        case 'Unary': async = expr(node.operand); markOverflow(node); break;
+        case 'Bin': async = expr(node.left); async = expr(node.right) || async; markOverflow(node); break;
+        case 'Ident':
+          if (node.lower === 'err' && !isVar(node.lower) && !controls.has('err')) { node.errNumber = true; break; }
+          meCheck(node); async = ident(node); break;
+        case 'Member': async = member(node, 'read'); break;
         case 'CallOrIndex': async = callOrIndex(node); break;
         case 'IndexExpr':
           async = expr(node.target);
@@ -141,6 +283,7 @@
         builtinArgs(l, node.name, [], node.line);
         return ASYNC_BUILTINS.has(l);
       }
+      if (l === 'tab' && node.inPrint) return false;
       if (program.optionExplicit) throw undeclared(node.name, node.line);
       scope.declared.add(l); // implizite Variant-Variable
       return false;
@@ -160,8 +303,12 @@
       }
       if (BUILTINS[l]) {
         builtinArgs(l, node.name, node.args, node.line);
+        if (l === 'len' && node.args[0] && node.args[0].type === 'Ident' && BYTE_SIZES[varType(node.args[0].lower)]) {
+          node.lenBytes = BYTE_SIZES[varType(node.args[0].lower)];
+        }
         return async || ASYNC_BUILTINS.has(l);
       }
+      if ((l === 'tab' || l === 'spc') && node.inPrint) return async;
       if (l in CONSTANTS) throw syntaxError(`'${node.name}' ist eine Konstante und kein Array.`, node.line);
       throw syntaxError(`Sub oder Function '${node.name}' ist nicht definiert.`, node.line);
     }
@@ -224,7 +371,24 @@
           throw syntaxError(`Sub oder Function '${s.name}' ist nicht definiert.`, s.line);
         }
         case 'Print':
-          for (const it of s.items) if (it.expr) expr(it.expr);
+          for (const it of s.items) {
+            if (!it.expr) continue;
+            const e = it.expr;
+            // Tab(n) und Spc(n) gibt es nur in Debug.Print
+            if ((e.type === 'CallOrIndex' && (e.lower === 'tab' || e.lower === 'spc') && !isVar(e.lower) && !procs[e.lower]) ||
+                (e.type === 'Ident' && e.lower === 'tab' && !isVar(e.lower) && !procs[e.lower])) {
+              e.inPrint = true;
+              if (e.type === 'CallOrIndex' && e.args.length > 1) throw syntaxError(`Falsche Anzahl an Argumenten für '${e.name}'.`, e.line);
+              if (e.type === 'CallOrIndex' && e.lower === 'spc' && e.args.length !== 1) throw syntaxError("Argument nicht optional: 'Spc' braucht die Anzahl der Leerzeichen.", e.line);
+            }
+            expr(e);
+          }
+          break;
+        case 'Label': case 'Stop': break;
+        case 'GoTo': case 'OnError': case 'Resume':
+          if (s.label !== undefined && s.label !== null && !scope.labels.has(s.label)) {
+            throw syntaxError(`Sprungmarke nicht definiert: '${s.labelName}'. Lege sie in dieser Prozedur an, z. B. ${s.labelName}: in einer eigenen Zeile.`, s.line);
+          }
           break;
         case 'Assert': expr(s.expr); break;
         case 'If':
@@ -259,6 +423,15 @@
       }
     }
 
+    function checkNestedLabels(list, top) {
+      for (const st of list) {
+        if (st.type === 'Label' && !top) throw syntaxError(`Die Sprungmarke '${st.name}' steht innerhalb eines Blocks (If, Schleife …). Hier werden Sprungmarken nur direkt in der Prozedur unterstützt.`, st.line);
+        for (const key of ['body', 'elseBody']) if (Array.isArray(st[key])) checkNestedLabels(st[key], false);
+        if (st.branches) for (const b of st.branches) checkNestedLabels(b.body, false);
+        if (st.cases) for (const c of st.cases) checkNestedLabels(c.body, false);
+      }
+    }
+
     function collectReDims(list, out) {
       for (const s of list) {
         if (s.type === 'ReDim') for (const it of s.items) out.add(it.lower);
@@ -269,7 +442,7 @@
     }
 
     // Modulebene
-    scope = { proc: null, declared: new Set(), consts: new Set() };
+    scope = { proc: null, declared: new Set(), consts: new Set(), types: new Map(), labels: new Map() };
     for (const d of program.moduleDecls) {
       if (d.type === 'ConstDecl') expr(d.expr);
       else if (d.bounds) for (const b of d.bounds) { expr(b.lower); expr(b.upper); }
@@ -282,15 +455,28 @@
         if (p.defaultExpr) expr(p.defaultExpr);
       }
       if (proc.kind === 'function') scope.declared.add(proc.lower);
+      scope.types = new Map();
+      for (const p of proc.params) scope.types.set(p.lower, p.isArray || p.paramArray ? 'array' : p.type);
+      if (proc.kind === 'function') scope.types.set(proc.lower, proc.returnType);
       for (const d of proc.decls) {
         scope.declared.add(d.lower);
         if (d.type === 'ConstDecl') scope.consts.add(d.lower);
+        scope.types.set(d.lower, d.isArray ? 'array' : (d.type === 'ConstDecl' && d.varType === 'variant' ? staticType(d.expr) : d.varType));
       }
       collectReDims(proc.body, scope.declared);
+      // Sprungmarken (nur auf oberster Ebene der Prozedur)
+      scope.labels = new Map();
+      proc.labels = scope.labels;
+      proc.body.forEach((st, i) => {
+        if (st.type !== 'Label') return;
+        if (scope.labels.has(st.lower)) throw syntaxError(`Doppelte Sprungmarke: '${st.name}' gibt es in dieser Prozedur schon.`, st.line);
+        scope.labels.set(st.lower, i);
+      });
+      checkNestedLabels(proc.body, true);
       block(proc.body);
     }
     return program;
   }
 
-  return { analyze };
+  return { analyze, SPECIAL_OBJECTS };
 });

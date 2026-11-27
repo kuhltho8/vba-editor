@@ -61,11 +61,16 @@ Die Schüler arbeiten im Unterricht selten mit Debug.Print, deshalb ist eine gut
 - Einfacher Formular-Designer neben dem Editor: Textfelder, Bezeichnungsfelder und Buttons per Klick anlegen, verschieben, benennen.
 - Ereignisprozeduren wie in Access: `Private Sub btnBerechnen_Click() ... End Sub`.
 - Namenskonvention der Klasse (unbedingt als Standard vorschlagen und in der Hilfe erklären):
-  - Eingabefelder beginnen mit `E_` (z. B. `E_Eingabe1`)
-  - Ausgabefelder beginnen mit `A_` (z. B. `A_Ergebnis`)
+  - Standardnamen kleingeschrieben (Wunsch Thomas, 26.11.2026):
+  - Eingabefelder beginnen mit `e_` (z. B. `e_eingabe1`)
+  - Ausgabefelder beginnen mit `a_` (z. B. `a_ausgabe1`)
+  - Optionsgruppen beginnen mit `o_` (z. B. `o_option1`)
+  - Schaltflächen `btnBefehl1`, Bezeichnungsfelder `lblText1`, Listenfelder `lstAusgabe1`
 - Zugriff auf Felder ohne `Me.`, direkt über den Namen:
-  - Lesen: `zahl1 = E_Eingabe1`
-  - Schreiben: `A_Ergebnis = summe`
+  - Lesen: `zahl1 = e_eingabe1`
+  - Schreiben: `a_ausgabe1 = summe`
+- Listenfeld (Wertliste wie in Access) für mehrere Ausgaben in Schleifen: `AddItem`, `RemoveItem`, `RowSource = ""` zum Leeren, `ListCount`, `ListIndex`, `ItemData(i)`, `Value`.
+- Layout: Code oben, Direktfenster darunter (kleiner, Trenner verschiebbar); Formular per Button „Formular“ rechts über die volle Höhe einblendbar.
 - Werte aus Textfeldern kommen als String/Variant; Verhalten möglichst wie in Access (z. B. Val/CDbl nötig bzw. automatische Typumwandlung wie bei Variant).
 - Formular und Code gemeinsam speichern und laden.
 
@@ -90,10 +95,17 @@ Die Schüler arbeiten im Unterricht selten mit Debug.Print, deshalb ist eine gut
 - `src/forms.js` – Formularmodell, Laufzeit der Steuerelemente (Value, Caption, Visible …), Speichern als .bas mit Kopfzeile `' @Formular {json}`
 - `js/designer.js` – Formular-Designer (Entwurf) und Formularansicht
 - `js/highlight.js` – Syntaxfarben (Schlüsselwörter blau, Kommentare grün) als Ebene hinter dem Textfeld
+- `js/intellisense.js` – Live-Hilfe beim Tippen (QuickInfo mit Syntax, Vorschlagsliste); Tests: `node tests/intellisense-tests.js`
 - `src/vba.js` – bündelt alles für Browser (`window.VBA`) und Node (`require`)
 - `tests/run-tests.js` – Unit-Tests: `node tests/run-tests.js`; `tests/help-examples.js` prüft alle Hilfe-Beispiele
 - `js/help.js` – Inhalte des Hilfefensters (Themen mit Beispiel)
 - `js/app.js` – Oberfläche (Editor, Konsole, Dialoge, Hilfe, Neu/Rückgängig)
-- `index.html` – einfache Testseite (Editor + Konsole); die richtige Editor-UI folgt im nächsten Schritt
+- `index.html` – Oberfläche (Editor, Direktfenster, Formularbereich, Hilfe)
+
+## Entscheidungen (Fehlerbehebung nach Volltest, 26.11.2026)
+
+- Verhalten wie in Access: Integer-Überlauf schon bei `200 * 200`, Punkt in Zahlentexten = Tausendertrennzeichen, Direktfenster max. 200 Zeilen, `Stop` hält an (Fortsetzen/Beenden).
+- `On Error`/`Resume`/`Err` unterstützt; Sprungmarken nur auf oberster Prozedurebene.
+- Debug-Modus (Einzelschritt, Haltepunkte) vorerst nicht.
 
 Die Module funktionieren ohne Build: im Browser als normale `<script>`-Dateien, in Node per `require`.

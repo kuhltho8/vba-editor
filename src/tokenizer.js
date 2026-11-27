@@ -32,6 +32,7 @@
     'then', 'to', 'true', 'until', 'wend', 'while', 'with', 'xor'
   ]);
 
+  const TYPE_CHARS = { '%': 'integer', '&': 'long', '!': 'single', '#': 'double', '@': 'currency', '$': 'string' };
   const isLetter = (c) => /[A-Za-zÄÖÜäöüß]/.test(c);
   const isIdentChar = (c) => /[A-Za-z0-9_ÄÖÜäöüß]/.test(c);
   const isDigit = (c) => c >= '0' && c <= '9';
@@ -122,9 +123,12 @@
         while (j < src.length && re.test(src[j])) j++;
         if (j > i + 2) {
           const txt = src.slice(i + 2, j);
-          push('num', parseInt(txt, isHex ? 16 : 8));
+          let v = parseInt(txt, isHex ? 16 : 8);
+          const tok = push('num', v);
           i = j;
-          if (src[i] === '&') i++; // Typzeichen &H..& ignorieren
+          if (src[i] === '&') { i++; tok.numType = 'long'; } // &HFF& ist Long
+          else if (v <= 0xFFFF) { if (v > 32767) tok.value = v - 65536; tok.numType = 'integer'; } // &HFFFF = -1 wie in VBA
+          else tok.numType = 'long';
           continue;
         }
       }
@@ -148,10 +152,14 @@
           }
         }
         const txt = src.slice(i, j).replace(/[dD]/, 'e');
-        push('num', parseFloat(txt));
+        const tok = push('num', parseFloat(txt));
+        if (/[.eEdD]/.test(txt)) tok.numType = 'double';
         i = j;
-        // Typkennzeichen wie 5# oder 3! ignorieren
-        if (/[#!@%]/.test(src[i] || '') && !isIdentChar(src[i + 1] || '')) i++;
+        // Typkennzeichen wie 5# oder 3! oder 200&
+        if (/[#!@%&]/.test(src[i] || '') && !isIdentChar(src[i + 1] || '') && (src[i] !== '&' || ampIsTypeChar(src, i))) {
+          tok.numType = TYPE_CHARS[src[i]];
+          i++;
+        }
         continue;
       }
 
@@ -161,8 +169,14 @@
         while (j < src.length && isIdentChar(src[j])) j++;
         let word = src.slice(i, j);
         const lower = word.toLowerCase();
-        // Typkennzeichen am Namen (Left$, zahl%, ...) – nur $ wird häufig benutzt
-        if (src[j] === '$') j++;
+        // Typkennzeichen am Namen: Left$, i%, l&, s!, d#, c@
+        let typeChar = null;
+        const tc = src[j];
+        const after = src[j + 1] || '';
+        if (tc === '$' || tc === '%' || tc === '@' || tc === '#') typeChar = tc;
+        else if (tc === '!' && !isLetter(after) && after !== '[') typeChar = tc; // sonst Me!feld
+        else if (tc === '&' && ampIsTypeChar(src, j)) typeChar = tc; // x& nur, wenn danach kein Operand folgt (sonst Verkettung)
+        if (typeChar) j++;
         if (KEYWORDS.has(lower)) {
           if (lower === 'rem' && atStatementStart()) {
             i = j;
@@ -171,9 +185,20 @@
           }
           push('kw', lower, { raw: word });
         } else {
-          push('ident', word, { lower });
+          push('ident', word, typeChar ? { lower, typeChar: TYPE_CHARS[typeChar] } : { lower });
         }
         i = j;
+        continue;
+      }
+
+      // Name in eckigen Klammern: [e_zahl1]
+      if (c === '[') {
+        const end = src.indexOf(']', i + 1);
+        const nlPos = src.indexOf('\n', i + 1);
+        if (end === -1 || (nlPos !== -1 && nlPos < end) || end === i + 1) throw syntaxError("Unerwartetes Zeichen '['. Ein Name in eckigen Klammern braucht ein schließendes ']'.", line);
+        const word = src.slice(i + 1, end);
+        push('ident', word, { lower: word.toLowerCase(), bracketed: true });
+        i = end + 1;
         continue;
       }
 
@@ -190,6 +215,16 @@
     push('nl', '\n');
     push('eof', null);
     return tokens;
+  }
+
+  /** Ist das & an Position i ein Typkennzeichen (200&, l&) und keine Verkettung? */
+  function ampIsTypeChar(src, i) {
+    let k = i + 1;
+    while (src[k] === ' ' || src[k] === '\t') k++;
+    const nx = src[k];
+    if (nx === undefined || nx === '\n') return true;
+    if (/^as\b/i.test(src.slice(k, k + 3))) return true;
+    return ',):=\'*+-/\\^<>;'.includes(nx) && !(nx === '-' && /[0-9.]/.test(src[k + 1] || ''));
   }
 
   function prevIsValue(tokens) {

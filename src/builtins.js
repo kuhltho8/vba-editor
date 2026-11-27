@@ -195,6 +195,34 @@
     return out;
   }
 
+  /** Format(x, "@@@@"): @ = Zeichen oder Leerzeichen, & = Zeichen oder nichts, ! = von links füllen, < > = klein/groß */
+  function formatStringPattern(text, f) {
+    const toks = [];
+    let ltr = false, cs = null;
+    for (let i = 0; i < f.length; i++) {
+      const ch = f[i];
+      if (ch === '"') { const e = f.indexOf('"', i + 1); const lit = e === -1 ? f.slice(i + 1) : f.slice(i + 1, e); toks.push({ lit }); i = e === -1 ? f.length : e; continue; }
+      if (ch === '\\') { toks.push({ lit: f[i + 1] || '' }); i++; continue; }
+      if (ch === '@' || ch === '&') { toks.push({ ph: ch }); continue; }
+      if (ch === '!') { ltr = true; continue; }
+      if (ch === '<' || ch === '>') { cs = ch; continue; }
+      toks.push({ lit: ch });
+    }
+    let s = cs === '>' ? text.toUpperCase() : cs === '<' ? text.toLowerCase() : text;
+    const parts = new Array(toks.length);
+    if (ltr) {
+      let k = 0;
+      toks.forEach((t, i) => { parts[i] = t.lit !== undefined ? t.lit : (k < s.length ? s[k++] : (t.ph === '@' ? ' ' : '')); });
+      return parts.join('') + s.slice(k);
+    }
+    let k = s.length;
+    for (let i = toks.length - 1; i >= 0; i--) {
+      const t = toks[i];
+      parts[i] = t.lit !== undefined ? t.lit : (k > 0 ? s[--k] : (t.ph === '@' ? ' ' : ''));
+    }
+    return s.slice(0, k) + parts.join('');
+  }
+
   function vbaFormat(value, fmt, ctx) {
     if (value === NULL) return '';
     if (fmt === undefined || fmt === '') return value === EMPTY ? '' : toStr(value, ctx.line);
@@ -231,6 +259,7 @@
       if (typeof value === 'string' && isNaN(parseNumberString(value))) return value;
       return formatNumberPattern(n(), f);
     }
+    if (/[@&]/.test(stripped) && !/[0#]/.test(stripped)) return formatStringPattern(toStr(value, ctx.line), f);
     if (/^[@&<>!]+$/.test(stripped)) {
       const s = toStr(value, ctx.line);
       if (stripped.includes('>')) return s.toUpperCase();
@@ -338,6 +367,16 @@
   });
   def('space', 1, 1, ([n], c) => ' '.repeat(Math.max(0, int(n, c))));
   def('spc', 1, 1, ([n], c) => ' '.repeat(Math.max(0, int(n, c))));
+  // Str: Zahl als Text mit Leerzeichen für das Vorzeichen, immer mit Punkt (unabhängig von der Ländereinstellung)
+  def('str', 1, 1, ([v], c) => {
+    if (v === NULL) return NULL;
+    const t = numberToString(num(v, c)).replace(',', '.');
+    return t.startsWith('-') ? t : ' ' + t;
+  });
+  def('rgb', 3, 3, ([r, g, b], c) => {
+    const k = (x) => Math.max(0, Math.min(255, int(x, c)));
+    return k(r) + k(g) * 256 + k(b) * 65536;
+  });
   def('string', 2, 2, ([n, ch], c) => {
     const k = int(n, c);
     if (k < 0) throw argError(c);

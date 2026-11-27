@@ -16,6 +16,20 @@
       { kind: 'optiongroup', name: 'E_Art', caption: 'Art', x: 260, y: 70, w: 160, h: 90, options: [{ caption: 'Normal', value: 1 }, { caption: 'Rabatt', value: 2 }] }
     ]
   };
+  const FORM2 = {
+    caption: 'Liste', width: 480, height: 320, controls: [
+      { kind: 'textbox', name: 'e_anzahl', caption: 'Anzahl', x: 100, y: 20, w: 120, h: 24 },
+      { kind: 'button', name: 'btnStart', caption: 'Start', x: 260, y: 20, w: 120, h: 30 },
+      { kind: 'listbox', name: 'lstAusgabe', caption: '', x: 20, y: 60, w: 200, h: 160, rowSource: 'Alt' }
+    ]
+  };
+  const FORM3 = {
+    caption: 'Brutto', width: 400, height: 200, controls: [
+      { kind: 'textbox', name: 'e_netto', caption: 'Netto', x: 100, y: 20, w: 120, h: 24 },
+      { kind: 'textbox', name: 'a_brutto', caption: 'Brutto', x: 100, y: 60, w: 120, h: 24 },
+      { kind: 'button', name: 'btnBerechnen', caption: 'Berechnen', x: 260, y: 20, w: 120, h: 30 }
+    ]
+  };
   const cases = [
     // ---------- Ausgabe und Ausdrücke ----------
     { name: 'Debug.Print mit ; und ,', src: L(`
@@ -751,6 +765,256 @@ End Function`) },
 Dim E_Zahl1 As Integer
 Private Sub btnBerechnen_Click()
 End Sub`) },
+    { name: 'Listenfeld: AddItem in einer Schleife, ListCount, RowSource leeren', form: FORM2,
+      actions: [{ input: ['e_anzahl', '3'] }, { click: 'btnStart' }], controls: { lstAusgabe: '1 x 7 = 7|2 x 7 = 14|3 x 7 = 21' },
+      out: [' 1 ', ' 3 '], src: L(`
+Private Sub btnStart_Click()
+    Dim i As Integer
+    Debug.Print lstAusgabe.ListCount
+    lstAusgabe.RowSource = ""
+    For i = 1 To e_anzahl
+        lstAusgabe.AddItem i & " x 7 = " & i * 7
+    Next i
+    Debug.Print lstAusgabe.ListCount
+End Sub`) },
+    { name: 'Listenfeld: Auswahl, Value, ListIndex, ItemData, Column, RemoveItem, AddItem mit Index', form: FORM2,
+      actions: [{ click: 'btnStart' }],
+      controls: { lstAusgabe: 'Null|A|C|D' },
+      out: ['Wahr', '-1 ', 'B', ' 1 ', 'B', 'B', 'C', 'Wahr', 'C', 'D', ' 2 '], src: L(`
+Private Sub btnStart_Click()
+    lstAusgabe.RowSource = "A;B;C"
+    Debug.Print IsNull(lstAusgabe.Value)
+    Debug.Print lstAusgabe.ListIndex; ""
+    lstAusgabe.ListIndex = 1
+    Debug.Print lstAusgabe.Value
+    Debug.Print lstAusgabe.ListIndex
+    Debug.Print lstAusgabe.ItemData(1)
+    Debug.Print lstAusgabe.Column(0)
+    Debug.Print lstAusgabe.Column(0, 2)
+    lstAusgabe.RemoveItem 1
+    Debug.Print IsNull(lstAusgabe)
+    lstAusgabe = "c"
+    Debug.Print lstAusgabe
+    Call lstAusgabe.AddItem("D")
+    Debug.Print lstAusgabe.ItemData(lstAusgabe.ListCount - 1)
+    lstAusgabe.AddItem "Null", 0
+    Debug.Print lstAusgabe.ListIndex
+End Sub`) },
+    { name: 'Listenfeld: AddItem ohne Argument → Argument nicht optional', form: FORM2,
+      error: /Argument nicht optional/, access: 'Argument ist nicht optional', line: 2, src: L(`
+Private Sub btnStart_Click()
+    lstAusgabe.AddItem
+End Sub`) },
+    { name: 'Listenfeld: ListIndex außerhalb → Laufzeitfehler 7777', form: FORM2,
+      actions: [{ click: 'btnStart' }], error: /ListIndex/, access: 'Sie haben die ListIndex-Eigenschaft falsch verwendet', line: 2, src: L(`
+Private Sub btnStart_Click()
+    lstAusgabe.ListIndex = 5
+End Sub`) },
+    { name: 'Listenfeld: zu viele Einträge → Laufzeitfehler 2176 wie in Access', form: FORM2,
+      actions: [{ click: 'btnStart' }], error: /zu lang/, access: 'Die Einstellung für diese Eigenschaft ist zu lang', line: 4, src: L(`
+Private Sub btnStart_Click()
+    Dim i As Long
+    For i = 1 To 100000
+        lstAusgabe.AddItem "Zeile " & i
+    Next i
+End Sub`) },
+    { name: 'Listenfeld: AddItem (i) & " Euro" – Klammer gehört zum Argument', form: FORM2,
+      actions: [{ click: 'btnStart' }], controls: { lstAusgabe: 'Alt|5 Euro' }, src: L(`
+Private Sub btnStart_Click()
+    lstAusgabe.AddItem (5) & " Euro"
+End Sub`) },
+    { name: 'Listenfeld: AddItem mit Funktionsaufruf im Argument', form: FORM2,
+      actions: [{ click: 'btnStart' }], controls: { lstAusgabe: 'Alt|16' }, src: L(`
+Private Sub btnStart_Click()
+    lstAusgabe.AddItem Quadrat(4)
+End Sub
+Function Quadrat(x)
+    Quadrat = x * x
+End Function`) },
+    // ---------- Testbericht 26.11.2026 ----------
+    { name: 'F2: Me!feld wie Me.feld', form: FORM3, actions: [{ input: ['e_netto', '100'] }, { click: 'btnBerechnen' }],
+      controls: { a_brutto: '200' }, src: L(`
+Private Sub btnBerechnen_Click()
+    Me!a_brutto = Me!e_netto * 2
+End Sub`) },
+    { name: 'F15: [feld], Me("feld"), Me.Controls("feld"), Me![feld].Value', form: FORM3, actions: [{ input: ['e_netto', '5'] }, { click: 'btnBerechnen' }],
+      controls: { a_brutto: '20' }, out: ['5', '5', '5'], src: L(`
+Private Sub btnBerechnen_Click()
+    Debug.Print [e_netto]
+    Debug.Print Me("e_netto")
+    Debug.Print Me.Controls("e_netto").Value
+    Me![a_brutto].Value = [e_netto] * 4
+End Sub`) },
+    { name: 'F3: Steuerelement an Function mit Datentyp (ByRef) wird als Wert übergeben', form: FORM3,
+      actions: [{ input: ['e_netto', '100'] }, { click: 'btnBerechnen' }], controls: { a_brutto: '119' }, src: L(`
+Function Brutto(netto As Double) As Double
+    Brutto = netto * 1.19
+End Function
+Private Sub btnBerechnen_Click()
+    a_brutto = Brutto(e_netto)
+End Sub`) },
+    { name: 'F3: Variant-Variable an Double-ByRef bleibt Fehler', error: /ByRef-Argumenttyp/, src: L(`
+Sub Test(x As Double)
+End Sub
+Sub Main()
+    Dim v
+    v = 1
+    Test v
+End Sub`) },
+    { name: 'F4/F11/F12: RGB, Str, Format mit @', out: [' 255  65280  5-3.5', '|   5|5   |AB|'], src: L(`
+Sub Main()
+    Debug.Print RGB(255, 0, 0); RGB(0, 255, 0); Str(5); Str(-3.5)
+    Debug.Print "|" & Format(5, "@@@@") & "|" & Format(5, "!@@@@") & "|" & Format("ab", ">") & "|"
+End Sub`) },
+    { name: 'F5/F6/F16: DoCmd.Close, Me.Caption, Me.Refresh', form: FORM3, actions: [{ click: 'btnBerechnen' }],
+      out: ['Brutto', 'Neu'], closed: true, src: L(`
+Private Sub btnBerechnen_Click()
+    Debug.Print Me.Caption
+    Me.Caption = "Neu"
+    Debug.Print Me.Caption
+    Me.Refresh
+    Me.Requery
+    DoCmd.Close
+End Sub`) },
+    { name: 'F5: DoCmd.OpenForm → verständliche Meldung', form: FORM3, error: /OpenForm gibt es hier nicht/, src: L(`
+Private Sub btnBerechnen_Click()
+    DoCmd.OpenForm "Rechner"
+End Sub`) },
+    { name: 'F7: On Error GoTo mit Err.Number und Err.Description', out: [' 11 Division durch Null'], src: L(`
+Sub Main()
+    On Error GoTo Fehler
+    Dim x As Double
+    x = 10 / 0
+    Debug.Print "nicht erreicht"
+    Exit Sub
+Fehler:
+    Debug.Print Err.Number; Err.Description
+End Sub`) },
+    { name: 'F7: Resume Next in einer Schleife, Fehler in aufgerufener Sub', out: ['-10 ', 'Fehler 11 ', ' 10 ', 'gefangen 9 '], src: L(`
+Sub Main()
+    Dim i As Integer
+    On Error GoTo F
+    For i = 1 To 3
+        Debug.Print 10 / (i - 2)
+    Next
+    Test
+    Exit Sub
+F:
+    If Err.Number = 9 Then
+        Debug.Print "gefangen"; Err.Number
+        Exit Sub
+    End If
+    Debug.Print "Fehler"; Err.Number
+    Resume Next
+End Sub
+Sub Test()
+    Dim a(2)
+    a(5) = 1
+End Sub`) },
+    { name: 'F7: On Error Resume Next, Err.Clear, Resume, GoTo, Err.Raise', out: ['weiter 13 ', ' 0 ', ' 2 ', ' 1000 Eigener Fehler', ' 3 '], src: L(`
+Sub Main()
+    On Error Resume Next
+    Dim x As Integer, n As Integer
+    x = "abc"
+    Debug.Print "weiter"; Err.Number
+    Err.Clear
+    Debug.Print Err
+    On Error GoTo F
+    Debug.Print 10 / n
+    On Error GoTo G
+    Err.Raise 1000, , "Eigener Fehler"
+    Exit Sub
+F:
+    n = 5
+    Resume
+G:
+    Debug.Print Err.Number; Err.Description
+    Resume Weiter
+Weiter:
+    n = 0
+Nochmal:
+    n = n + 1
+    If n < 3 Then GoTo Nochmal
+    Debug.Print n
+End Sub`) },
+    { name: 'F7: Resume ohne Fehler → Laufzeitfehler 20', error: /Resume ohne Fehler/, access: 'Resume ohne Fehler', src: L(`
+Sub Main()
+    Resume Next
+End Sub`) },
+    { name: 'F7: GoTo ohne Sprungmarke → Kompilierfehler', error: /Sprungmarke nicht definiert/, line: 2, src: L(`
+Sub Main()
+    GoTo Ende
+End Sub`) },
+    { name: 'F7: Err.Raise ohne Fehlerbehandlung', error: /Laufzeitfehler '1000': Mein Fehler/, src: L(`
+Sub Main()
+    Err.Raise 1000, , "Mein Fehler"
+End Sub`) },
+    { name: 'F9: 200 * 200 → Überlauf wie in Access', error: /Überlauf/, access: 'Überlauf', line: 2, src: L(`
+Sub Main()
+    Debug.Print 200 * 200
+End Sub`) },
+    { name: 'F9: 200& * 200, CLng(200) * 200, Double und Variant ohne Überlauf', out: [' 40000  40000  40000  40000 '], src: L(`
+Sub Main()
+    Dim v
+    v = 200
+    Debug.Print 200& * 200; CLng(200) * 200; 200 * 200#; v * 200
+End Sub`) },
+    { name: 'F9: Integer-Variable * Integer → Überlauf, Byte + Byte → Überlauf', error: /Überlauf/, line: 4, src: L(`
+Sub Main()
+    Dim i As Integer
+    i = 300
+    Debug.Print i * i
+End Sub`) },
+    { name: 'F9: Len(Integer) = 2, Len(Long) = 4, Len(String)', out: [' 2  4  8  3 '], src: L(`
+Sub Main()
+    Dim i As Integer, l As Long, d As Double, s As String
+    s = "abc"
+    Debug.Print Len(i); Len(l); Len(d); Len(s)
+End Sub`) },
+    { name: 'F9: Punkt ist Tausendertrennzeichen wie in Access ("3.5" → 35)', out: [' 35  1000  1000,5  3,5  3,5 '], src: L(`
+Sub Main()
+    Debug.Print CDbl("3.5"); CLng("1.000"); CDbl("1.000,5"); CDbl("3,5"); Val("3.5")
+End Sub`) },
+    { name: 'F9: Textfeld "3.5" in Double-Variable → 35', form: FORM3, actions: [{ input: ['e_netto', '3.5'] }, { click: 'btnBerechnen' }],
+      controls: { a_brutto: '35' }, src: L(`
+Private Sub btnBerechnen_Click()
+    Dim z As Double
+    z = e_netto
+    a_brutto = z
+End Sub`) },
+    { name: 'F10: Hinweis beginnt groß und ohne Komma', error: /Erwartet: Anweisungsende/, hint: /^Gefunden: ';'/, src: L(`
+Sub Main()
+    x = 5;
+End Sub`) },
+    { name: 'F13: Tab() und Spc() in Debug.Print', out: ['a        b', 'x   y', 'abcdefghijkl', '    z', 'a             b'], src: L(`
+Sub Main()
+    Debug.Print "a"; Tab(10); "b"
+    Debug.Print "x"; Spc(3); "y"
+    Debug.Print "abcdefghijkl"; Tab(5); "z"
+    Debug.Print "a"; Tab; "b"
+End Sub`) },
+    { name: 'F14: Stop hält an (Fortsetzen)', out: ['vor', 'nach'], paused: [3], src: L(`
+Sub Main()
+    Debug.Print "vor"
+    Stop
+    Debug.Print "nach"
+End Sub`) },
+    { name: 'F17: Typkennzeichen Dim i%, s$, l&, d#', out: [' 5 x 70000 Integer String Long Double'], src: L(`
+Sub Main()
+    Dim i%, s$, l&, d#
+    i = 5: s = "x": l = 70000: d = 1
+    Debug.Print i; s; l; TypeName(i); " "; TypeName(s); " "; TypeName(l); " "; TypeName(d)
+End Sub`) },
+    { name: 'F17: a&b bleibt Verkettung', out: ['12'], src: L(`
+Sub Main()
+    a = 1: b = 2
+    Debug.Print a&b
+End Sub`) },
+    { name: 'F19: Fehler 94 nennt das leere Feld', form: FORM3, actions: [{ click: 'btnBerechnen' }], error: /e_netto ist leer/, src: L(`
+Private Sub btnBerechnen_Click()
+    Dim z As Double
+    z = e_netto
+End Sub`) },
     { name: 'Keine startbare Sub', src: L(`
 Function F()
   F = 1
@@ -763,7 +1027,11 @@ End Function`), error: /Keine startbare Sub/ },
     const msgs = [];
     const inputs = (c.inputs || []).slice();
     const msgRet = (c.msgRet || []).slice();
+    const paused = [];
+    let closed = false;
     const host = {
+      pause: async (line) => { paused.push(line); return 'continue'; },
+      closeForm: () => { closed = true; },
       print: (l) => out.push(l),
       msgBox: async (p) => { msgs.push(p); return msgRet.length ? msgRet.shift() : 1; },
       inputBox: async () => (inputs.length ? inputs.shift() : '')
@@ -774,7 +1042,10 @@ End Function`), error: /Keine startbare Sub/ },
       if (c.form) {
         runtime = new VBA.FormRuntime(c.form);
         const prog = VBA.compile(c.src, { controls: c.form.controls });
-        const session = VBA.createRun(prog, host, { maxSteps: c.maxSteps, controls: runtime.adapters() });
+        const session = VBA.createRun(prog, host, {
+          maxSteps: c.maxSteps, controls: runtime.adapters(),
+          form: { getCaption: () => runtime.caption, setCaption: (t) => { runtime.caption = t; } }
+        });
         session.open();
         if (session.has('Form_Load')) await session.invoke('Form_Load');
         for (const a of c.actions || []) {
@@ -797,6 +1068,7 @@ End Function`), error: /Keine startbare Sub/ },
         if (!c.error.test(full)) problems.push(`Fehlermeldung passt nicht: ${full}`);
         if (c.access && error.accessMessage !== c.access) problems.push(`Access-Text "${error.accessMessage}" statt "${c.access}"`);
         if (c.line !== undefined && error.line !== c.line) problems.push(`Zeile ${error.line} statt ${c.line}`);
+        if (c.hint && !c.hint.test(error.hint || '')) problems.push(`Hinweis passt nicht: ${error.hint}`);
       }
     } else if (error) {
       problems.push(`Unerwarteter Fehler: ${error.message}`);
@@ -808,10 +1080,13 @@ End Function`), error: /Keine startbare Sub/ },
     if (c.controls && runtime) {
       for (const [n, want] of Object.entries(c.controls)) {
         const st = runtime.get(n);
-        const got = st.def.kind === 'label' || st.def.kind === 'button' ? st.caption : runtime.displayText(n);
+        const got = st.def.kind === 'label' || st.def.kind === 'button' ? st.caption
+          : st.def.kind === 'listbox' ? st.items.join('|') : runtime.displayText(n);
         if (got !== want) problems.push(`Steuerelement ${n}: "${got}" statt "${want}"`);
       }
     }
+    if (c.paused && JSON.stringify(paused) !== JSON.stringify(c.paused)) problems.push(`Stop: ${JSON.stringify(paused)}`);
+    if (c.closed && !closed) problems.push('DoCmd.Close wurde nicht ausgeführt');
     if (c.msg) {
       const a = JSON.stringify(msgs), b = JSON.stringify(c.msg);
       if (a !== b) problems.push(`MsgBox:\n    erhalten: ${a}\n    erwartet: ${b}`);

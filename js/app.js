@@ -49,7 +49,10 @@
     if (formSession) formSession.stale = true;
     if (designer) designer.renderProps();
   });
+  // Live-Hilfe (QuickInfo und Vorschlagsliste) wie im VBA-Editor
+  const intelli = new VBAIntelliSense.IntelliSense(code, () => formModel.controls);
   code.addEventListener('keydown', (e) => {
+    if (intelli.handleKey(e)) return;
     if (e.key === 'Tab') {
       e.preventDefault();
       const s = code.selectionStart, t = code.selectionEnd;
@@ -66,8 +69,14 @@
     }
   });
   document.addEventListener('keydown', (e) => {
+    // Strg+Pause hält das Programm an wie in Access
+    if ((e.key === 'Pause' || e.key === 'Cancel') && current) { e.preventDefault(); current.stop(); if (closeModal) closeModal(null); return; }
     if (e.key === 'F5') { e.preventDefault(); if (!current) { showPane(hasForm() ? 'formPane' : 'consolePane'); run(); } }
   });
+
+  function markStop(line) {
+    if (line) { markError(line); showPane('editorPane'); } else markError(null);
+  }
 
   function markError(line) {
     errorLine = line || null;
@@ -108,13 +117,38 @@
   }
 
   // ---------- Konsole ----------
+  // Direktfenster: Ausgaben sammeln und höchstens einmal pro Bildaufbau schreiben.
+  // Wie in Access bleiben nur die letzten 200 Zeilen stehen.
+  const CONSOLE_MAX = 200;
+  let pendingOut = [];
+  let outScheduled = false;
   function out(text, cls) {
-    const span = document.createElement('span');
-    if (cls) span.className = cls;
-    span.textContent = text + '\n';
-    consoleEl.appendChild(span);
+    pendingOut.push({ text, cls });
+    if (pendingOut.length > CONSOLE_MAX) pendingOut.splice(0, pendingOut.length - CONSOLE_MAX);
+    if (!outScheduled) {
+      outScheduled = true;
+      const go = () => { if (outScheduled) flushOut(); };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(go);
+      setTimeout(go, 60); // auch im Hintergrund-Tab
+    }
+  }
+  function flushOut() {
+    outScheduled = false;
+    if (!pendingOut.length) return;
+    const frag = document.createDocumentFragment();
+    for (const o of pendingOut) {
+      const span = document.createElement('span');
+      if (o.cls) span.className = o.cls;
+      span.textContent = o.text + '\n';
+      frag.appendChild(span);
+    }
+    pendingOut = [];
+    consoleEl.appendChild(frag);
+    let extra = consoleEl.childElementCount - CONSOLE_MAX;
+    while (extra-- > 0) consoleEl.firstChild.remove();
     consoleEl.scrollTop = consoleEl.scrollHeight;
   }
+  function clearConsole() { pendingOut = []; consoleEl.textContent = ''; }
 
   // ---------- Tabs (Handy) ----------
   function showPane(id) {
@@ -122,6 +156,39 @@
     document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('active', p.id === id));
   }
   document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => showPane(t.dataset.pane)));
+
+  // ---------- Trenner zwischen Code und Direktfenster ----------
+  const SPLIT_KEY = 'vba-editor-split';
+  const splitter = $('splitter');
+  function setSplit(ratio, save) {
+    const r = Math.max(0.2, Math.min(0.85, ratio));
+    $('editorPane').style.flex = `${r} 1 0`;
+    $('consolePane').style.flex = `${1 - r} 1 0`;
+    if (save) store.set(SPLIT_KEY, String(r));
+    return r;
+  }
+  let splitRatio = parseFloat(store.get(SPLIT_KEY));
+  splitRatio = setSplit(isFinite(splitRatio) ? splitRatio : 0.6, false);
+  splitter.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    splitter.setPointerCapture(e.pointerId);
+    const col = splitter.parentElement.getBoundingClientRect();
+    const move = (ev) => { splitRatio = setSplit((ev.clientY - col.top) / col.height, false); };
+    const up = () => {
+      splitter.removeEventListener('pointermove', move);
+      splitter.removeEventListener('pointerup', up);
+      splitter.removeEventListener('pointercancel', up);
+      setSplit(splitRatio, true);
+    };
+    splitter.addEventListener('pointermove', move);
+    splitter.addEventListener('pointerup', up);
+    splitter.addEventListener('pointercancel', up);
+  });
+  splitter.addEventListener('keydown', (e) => {
+    const d = { ArrowUp: -0.05, ArrowDown: 0.05 }[e.key];
+    if (d) { e.preventDefault(); splitRatio = setSplit(splitRatio + d, true); }
+  });
+  splitter.addEventListener('dblclick', () => { splitRatio = setSplit(0.6, true); });
 
   // ---------- Dialoge (MsgBox / InputBox) ----------
   const modal = $('modal'), mTitle = $('modalTitle'), mText = $('modalText'), mIcon = $('modalIcon');
@@ -178,6 +245,25 @@
         buttons: set.map(([label, value], i) => ({ label, primary: i === Math.min(def, set.length - 1), value: () => value }))
       });
     },
+    // Stop-Anweisung: anhalten wie an einem Haltepunkt
+    pause: async (line) => {
+      flushOut();
+      markError(null);
+      markStop(line);
+      const r = await openDialog({
+        title: 'Microsoft Visual Basic', icon: '⏸',
+        text: `Die Ausführung wurde durch die Anweisung Stop in Zeile ${line} angehalten.`,
+        note: 'In Access wäre der Code jetzt im Haltemodus. Hier kannst du fortsetzen oder beenden.',
+        buttons: [
+          { label: 'Beenden', cancel: true, value: () => 'end' },
+          { label: 'Fortsetzen', primary: true, value: () => 'continue' }
+        ]
+      });
+      markStop(null);
+      return r || 'end';
+    },
+    // DoCmd.Close: Formular nach dem laufenden Ereignis schließen
+    closeForm: () => { if (formSession) formSession.closeRequested = true; },
     inputBox: (prompt, title, deflt) => openDialog({
       title, text: prompt, input: deflt,
       buttons: [
@@ -275,16 +361,38 @@
 
   function newSession(runtime) {
     const program = VBA.compile(code.value, { controls: formModel.controls });
-    const r = VBA.createRun(program, host, { controls: runtime.adapters() });
+    const r = VBA.createRun(program, host, {
+      controls: runtime.adapters(),
+      form: {
+        getCaption: () => runtime.caption,
+        setCaption: (t) => { runtime.caption = t; designer.setTitle(t); },
+        refresh: () => {}
+      }
+    });
     r.open();
     return r;
+  }
+
+  // Änderungen an Steuerelementen gesammelt anzeigen (AddItem in langen Schleifen bleibt schnell)
+  const pendingUpdates = new Set();
+  let updateTimer = null;
+  function scheduleUpdate(name) {
+    pendingUpdates.add(name);
+    if (updateTimer === null) {
+      updateTimer = setTimeout(() => {
+        updateTimer = null;
+        const names = [...pendingUpdates];
+        pendingUpdates.clear();
+        for (const n of names) designer.updateControl(n);
+      }, 0);
+    }
   }
 
   /** Formularansicht öffnen: Code übersetzen, Sitzung anlegen, Form_Load ausführen. */
   async function openFormView() {
     if (formSession) return true;
     markError(null);
-    const runtime = new VBA.FormRuntime(formModel, (name) => designer.updateControl(name));
+    const runtime = new VBA.FormRuntime(formModel, scheduleUpdate);
     runtime.onFocus = (name) => designer.focusControl(name);
     let r;
     try {
@@ -329,6 +437,7 @@
     } finally {
       current = null;
       btnRun.disabled = false; btnStop.disabled = true;
+      if (formSession && formSession.closeRequested) { closeFormView(); showToast('Das Formular wurde mit DoCmd.Close geschlossen.'); }
     }
   }
 
@@ -403,7 +512,13 @@
     if (current) current.stop();
     if (closeModal) closeModal(null);
   });
-  $('btnClear').addEventListener('click', () => { consoleEl.textContent = ''; });
+  $('btnClear').addEventListener('click', clearConsole);
+  // Menü „⋯“ (nur auf schmalen Bildschirmen sichtbar)
+  const btnMore = $('btnMore');
+  function setMore(open) { document.body.classList.toggle('more-open', open); btnMore.setAttribute('aria-expanded', String(open)); }
+  btnMore.addEventListener('click', (e) => { e.stopPropagation(); setMore(!document.body.classList.contains('more-open')); });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#btnMore')) setMore(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMore(false); });
   // ---------- Code ersetzen mit Rückgängig ----------
   const toast = $('toast'), toastText = $('toastText');
   let undoState = null, toastTimer = null;
@@ -532,6 +647,7 @@
   designer = new FormDesigner({
     canvas: $('formCanvas'),
     props: $('formProps'),
+    title: $('formTitle'), stage: $('formStage'), fit: $('formFit'), scroller: $('formScroll'),
     onChange: (m) => { store.set(FORM_KEY, JSON.stringify(m)); refreshEntries(); },
     onEvent: (name, ev) => fireEvent(name, ev),
     onEventProc: (name) => gotoEventProc(name),

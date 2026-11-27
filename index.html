@@ -6,20 +6,23 @@
 <title>VBA-Editor</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
-<body class="form-hidden">
+<body>
 <header class="topbar">
   <h1>VBA-Editor <span class="badge">Vorschau – Phase 2</span></h1>
   <div class="toolbar">
-    <label class="startsel">Start-Sub
+    <label class="startsel"><span>Start-Sub</span>
       <select id="entry" title="Welche Sub soll gestartet werden?"></select>
     </label>
     <button id="btnRun" class="primary" title="Programm ausführen (F5)">▶ Ausführen</button>
     <button id="btnStop" disabled title="Laufendes Programm abbrechen">■ Stoppen</button>
-    <button id="btnClear" title="Konsole leeren">Konsole leeren</button>
     <button id="btnForm" aria-pressed="false" title="Formular ein- oder ausblenden">▭ Formular</button>
-    <button id="btnNew" title="Neues Programm mit leerem Grundgerüst">Neu</button>
-    <button id="btnOpen" title="Programm (.bas oder .txt) öffnen">Öffnen</button>
-    <button id="btnSave" title="Programm und Formular als .bas-Datei speichern">Speichern</button>
+    <button id="btnMore" class="more-btn" aria-haspopup="true" aria-expanded="false" aria-controls="moreMenu" title="Weitere Befehle">⋯</button>
+    <div id="moreMenu" class="more" role="group" aria-label="Weitere Befehle">
+      <button id="btnClear" title="Konsole leeren">Konsole leeren</button>
+      <button id="btnNew" title="Neues Programm mit leerem Grundgerüst">Neu</button>
+      <button id="btnOpen" title="Programm (.bas oder .txt) öffnen">Öffnen</button>
+      <button id="btnSave" title="Programm und Formular als .bas-Datei speichern">Speichern</button>
+    </div>
     <input id="fileInput" type="file" accept=".bas,.txt,.cls,text/plain" hidden>
     <button id="btnHelp" class="help-btn" title="Hilfe und Beispiele (F1)" aria-expanded="false" aria-controls="helpPanel">? Hilfe</button>
   </div>
@@ -32,39 +35,48 @@
 </nav>
 
 <main class="panes">
-  <section id="editorPane" class="pane active">
-    <div class="editor">
-      <pre id="gutter" class="gutter" aria-hidden="true"></pre>
-      <div class="code-wrap">
-        <pre id="hl" class="hl" aria-hidden="true"></pre>
-        <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="VBA-Code"></textarea>
-      </div>
-    </div>
-  </section>
-  <div class="side">
-    <section id="formPane" class="pane">
-      <div class="form-head">
-        <span class="pane-title">Formular</span>
-        <div class="seg" role="group" aria-label="Ansicht">
-          <button id="btnDesign" class="seg-btn active" aria-pressed="true">Entwurf</button>
-          <button id="btnFormView" class="seg-btn" aria-pressed="false">Formularansicht</button>
+  <div class="main-col">
+    <section id="editorPane" class="pane active">
+      <div class="editor">
+        <pre id="gutter" class="gutter" aria-hidden="true"></pre>
+        <div class="code-wrap">
+          <pre id="hl" class="hl" aria-hidden="true"></pre>
+          <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="VBA-Code"></textarea>
         </div>
       </div>
-      <div id="toolbox" class="toolbox">
-        <button data-add="textbox" data-variant="input" title="Textfeld für Eingaben, Name beginnt mit E_">+ Eingabefeld (E_)</button>
-        <button data-add="textbox" data-variant="output" title="Textfeld für Ausgaben, Name beginnt mit A_">+ Ausgabefeld (A_)</button>
-        <button data-add="label">+ Bezeichnung</button>
-        <button data-add="button">+ Schaltfläche</button>
-        <button data-add="optiongroup">+ Optionsgruppe</button>
-      </div>
-      <div class="form-scroll"><div id="formCanvas" class="form-canvas"></div></div>
-      <div id="formProps" class="props"></div>
     </section>
+    <div id="splitter" class="splitter" role="separator" aria-orientation="horizontal" aria-label="Größe von Code und Direktfenster ändern" tabindex="0"></div>
     <section id="consolePane" class="pane">
       <div class="console-head">Direktfenster (Debug.Print)</div>
       <pre id="console" class="console" aria-live="polite"></pre>
     </section>
   </div>
+  <section id="formPane" class="pane">
+    <div class="form-head">
+      <span class="pane-title">Formular</span>
+      <div class="seg" role="group" aria-label="Ansicht">
+        <button id="btnDesign" class="seg-btn active" aria-pressed="true">Entwurf</button>
+        <button id="btnFormView" class="seg-btn" aria-pressed="false">Formularansicht</button>
+      </div>
+    </div>
+    <div id="toolbox" class="toolbox">
+      <button data-add="textbox" data-variant="input" title="Textfeld für Eingaben, Name beginnt mit e_">+ Eingabefeld (e_)</button>
+      <button data-add="textbox" data-variant="output" title="Textfeld für Ausgaben, Name beginnt mit a_">+ Ausgabefeld (a_)</button>
+      <button data-add="label">+ Bezeichnung</button>
+      <button data-add="button">+ Schaltfläche</button>
+      <button data-add="optiongroup" title="Optionsgruppe, Name beginnt mit o_">+ Optionsgruppe (o_)</button>
+      <button data-add="listbox" title="Listenfeld für mehrere Ausgaben untereinander (AddItem)">+ Listenfeld</button>
+    </div>
+    <div class="form-scroll" id="formScroll">
+      <div class="form-fit" id="formFit">
+        <div class="form-stage" id="formStage">
+          <div id="formTitle" class="form-title"></div>
+          <div id="formCanvas" class="form-canvas"></div>
+        </div>
+      </div>
+    </div>
+    <div id="formProps" class="props"></div>
+  </section>
   <aside id="helpPanel" class="help hidden" aria-label="Hilfe">
     <div class="help-head">
       <h2>Hilfe</h2>
@@ -106,6 +118,7 @@
 <script src="js/help.js"></script>
 <script src="js/designer.js"></script>
 <script src="js/highlight.js"></script>
+<script src="js/intellisense.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

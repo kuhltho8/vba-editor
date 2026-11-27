@@ -22,6 +22,7 @@
   // Laufzeitfehler: Nummer → Originaltext
   const RUNTIME_TEXTS = {
     5: 'Ungültiger Prozeduraufruf oder ungültiges Argument',
+    20: 'Resume ohne Fehler',
     6: 'Überlauf',
     9: 'Index außerhalb des gültigen Bereichs',
     10: 'Datenfeld ist unveränderlich oder momentan gesperrt',
@@ -33,6 +34,8 @@
     424: 'Objekt erforderlich',
     438: 'Objekt unterstützt diese Eigenschaft oder Methode nicht',
     2110: 'Microsoft Access kann den Fokus nicht auf dieses Steuerelement verschieben',
+    2176: 'Die Einstellung für diese Eigenschaft ist zu lang',
+    7777: 'Sie haben die ListIndex-Eigenschaft falsch verwendet',
     449: 'Argument ist nicht optional',
     450: 'Falsche Anzahl an Argumenten oder ungültige Zuweisung zu einer Eigenschaft'
   };
@@ -113,8 +116,9 @@
     }
     if (!access) return { kind: k, access: message.replace(/\.$/, ''), hint: '' };
     let hint = message;
-    if (hint.toLowerCase().startsWith(access.toLowerCase())) hint = hint.slice(access.length).replace(/^[\s:.–-]+/, '');
+    if (hint.toLowerCase().startsWith(access.toLowerCase())) hint = hint.slice(access.length).replace(/^[\s:.,;–-]+/, '');
     if (hint.replace(/\.$/, '') === access) hint = '';
+    if (hint) hint = hint.charAt(0).toUpperCase() + hint.slice(1); // Hinweis beginnt groß
     return { kind: k, access, hint };
   }
 
@@ -129,7 +133,7 @@
       const c = classify(message, kind, number);
       const prefix = c.kind === 'syntax'
         ? 'Fehler beim Kompilieren: '
-        : (c.kind === 'runtime' ? (number && RUNTIME_TEXTS[number] ? `Laufzeitfehler '${number}': ` : 'Laufzeitfehler: ') : '');
+        : (c.kind === 'runtime' ? (number ? `Laufzeitfehler '${number}': ` : 'Laufzeitfehler: ') : '');
       super((line ? `Zeile ${line}: ` : '') + prefix + c.access);
       this.name = 'VbaError';
       this.plainMessage = message;

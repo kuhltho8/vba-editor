@@ -16,7 +16,8 @@
 <li>Klicke auf <b>▶ Ausführen</b> (oder drücke <kbd>F5</kbd>).</li>
 <li>Hängt das Programm in einer Endlosschleife, beendest du es mit <b>■ Stoppen</b>.</li>
 </ol>
-<p>Mit <b>Neu</b> bekommst du wieder das leere Grundgerüst.</p>`,
+<p>Mit <b>Neu</b> bekommst du wieder das leere Grundgerüst.</p>
+<p><b>Live-Hilfe beim Tippen</b> wie im VBA-Editor: Tippst du z. B. <code>MsgBox </code>, zeigt ein gelbes Feld die Syntax, der aktuelle Parameter ist fett. Ab zwei Buchstaben (z. B. <code>vb</code>) erscheint eine Vorschlagsliste, nach <code>lstAusgabe.</code> die Eigenschaften und Methoden. Übernehmen mit <kbd>Tab</kbd>, <kbd>Enter</kbd> oder Doppelklick (am Handy antippen), schließen mit <kbd>Esc</kbd>. <kbd>Strg</kbd>+<kbd>Leertaste</kbd> öffnet die Liste jederzeit.</p>`,
       code: L(`
 Private Sub Main()
     Debug.Print("Hello World")
@@ -235,55 +236,113 @@ End Sub
     {
       id: 'forms', title: 'Formulare wie in Access',
       html: `<p>Im Bereich <b>Formular</b> baust du eine Oberfläche wie in Access. In der <b>Entwurfsansicht</b> legst du Steuerelemente an, verschiebst sie und gibst ihnen Namen. In der <b>Formularansicht</b> (oder mit <b>▶ Ausführen</b>) benutzt du das Formular.</p>
-<p class="help-warn"><b>Namenskonvention:</b> Eingabefelder beginnen mit <code>E_</code> (z. B. <code>E_Zahl1</code>), Ausgabefelder mit <code>A_</code> (z. B. <code>A_Ergebnis</code>). Schaltflächen beginnen mit <code>btn</code> (z. B. <code>btnBerechnen</code>).</p>
+<p>Mit dem Button <b>▭ Formular</b> oben blendest du den Formularbereich rechts ein und aus. Eingeblendet ist er gleich in der Formularansicht: Ein Klick auf eine Schaltfläche führt ihren Code aus.</p>
+<p class="help-warn"><b>Namenskonvention:</b> Eingabefelder beginnen mit <code>e_</code> (z. B. <code>e_zahl1</code>), Ausgabefelder mit <code>a_</code> (z. B. <code>a_ergebnis</code>), Optionsgruppen mit <code>o_</code> (z. B. <code>o_rechenart</code>). Schaltflächen beginnen mit <code>btn</code> (z. B. <code>btnBerechnen</code>), Listenfelder mit <code>lst</code>.</p>
 <p><b>Zugriff ohne <code>Me.</code></b>, direkt über den Namen:</p>
 <ul>
-<li>Lesen: <code>zahl1 = E_Zahl1</code></li>
-<li>Schreiben: <code>A_Ergebnis = summe</code></li>
+<li>Lesen: <code>zahl1 = e_zahl1</code></li>
+<li>Schreiben: <code>a_ergebnis = summe</code></li>
 <li>Bezeichnungsfeld: <code>lblInfo.Caption = "Fertig"</code></li>
 <li>Weitere Eigenschaften: <code>.Visible</code>, <code>.Enabled</code>, <code>.Locked</code>, <code>.ForeColor</code>, <code>.BackColor</code>, Methode <code>.SetFocus</code></li>
 </ul>
-<p><b>Ereignisprozeduren</b> wie in Access: Klickt man auf <code>btnBerechnen</code>, läuft <code>Private Sub btnBerechnen_Click()</code>. Weitere Ereignisse: <code>_AfterUpdate</code> und <code>_Change</code> bei Textfeldern, <code>_AfterUpdate</code> bei Optionsgruppen und <code>Form_Load</code> beim Öffnen. Im Entwurf legt der Button <i>Ereignisprozedur anlegen</i> den Rahmen im Code an.</p>
-<p class="help-warn"><b>Wie in Access:</b> Werte aus Textfeldern sind <b>Text</b>, ein leeres Feld ist <code>Null</code>. Deshalb ergibt <code>E_Zahl1 + E_Zahl2</code> bei 2 und 3 den Text „23“. Speichere die Werte in <code>Double</code>-Variablen oder wandle sie mit <code>CDbl</code>/<code>Val</code> um. Für leere Felder hilft <code>Nz(E_Zahl1, 0)</code>.</p>
+<p><b>Ereignisprozeduren</b> wie in Access: Klickt man auf <code>btnBerechnen</code>, läuft <code>Private Sub btnBerechnen_Click()</code>. Weitere Ereignisse: <code>_AfterUpdate</code> und <code>_Change</code> bei Textfeldern, <code>_AfterUpdate</code> bei Optionsgruppen und <code>Form_Load</code> beim Öffnen. Im Entwurf legt ein <b>Doppelklick</b> auf das Steuerelement (oder der Button <i>Ereignisprozedur anlegen</i>) den Rahmen im Code an.</p>
+<p class="help-warn"><b>Wie in Access:</b> Werte aus Textfeldern sind <b>Text</b>, ein leeres Feld ist <code>Null</code>. Deshalb ergibt <code>e_zahl1 + e_zahl2</code> bei 2 und 3 den Text „23“. Speichere die Werte in <code>Double</code>-Variablen oder wandle sie mit <code>CDbl</code>/<code>Val</code> um. Für leere Felder hilft <code>Nz(e_zahl1, 0)</code>.</p>
 <p>Eine <b>Optionsgruppe</b> liefert die Nummer der gewählten Option (1, 2, 3 …), solange nichts gewählt ist <code>Null</code>.</p>
+<p>Für mehrere Ausgaben untereinander (z. B. in Schleifen) gibt es das <b>Listenfeld</b>, siehe nächstes Thema.</p>
 <p>Das Beispiel übernimmt Code <b>und</b> Formular.</p>`,
       form: {
         caption: 'Rechner', width: 440, height: 250, controls: [
-          { kind: 'textbox', name: 'E_Zahl1', caption: 'Zahl 1:', x: 96, y: 20, w: 120, h: 26 },
-          { kind: 'textbox', name: 'E_Zahl2', caption: 'Zahl 2:', x: 96, y: 56, w: 120, h: 26 },
-          { kind: 'optiongroup', name: 'E_Rechenart', caption: 'Rechenart', x: 244, y: 12, w: 170, h: 108, options: [{ caption: 'Addieren', value: 1 }, { caption: 'Subtrahieren', value: 2 }, { caption: 'Multiplizieren', value: 3 }] },
+          { kind: 'textbox', name: 'e_zahl1', caption: 'Zahl 1:', x: 96, y: 20, w: 120, h: 26 },
+          { kind: 'textbox', name: 'e_zahl2', caption: 'Zahl 2:', x: 96, y: 56, w: 120, h: 26 },
+          { kind: 'optiongroup', name: 'o_rechenart', caption: 'Rechenart', x: 244, y: 12, w: 170, h: 108, options: [{ caption: 'Addieren', value: 1 }, { caption: 'Subtrahieren', value: 2 }, { caption: 'Multiplizieren', value: 3 }] },
           { kind: 'button', name: 'btnBerechnen', caption: 'Berechnen', x: 96, y: 100, w: 120, h: 32 },
-          { kind: 'textbox', name: 'A_Ergebnis', caption: 'Ergebnis:', x: 96, y: 152, w: 120, h: 26 },
+          { kind: 'textbox', name: 'a_ergebnis', caption: 'Ergebnis:', x: 96, y: 152, w: 120, h: 26 },
           { kind: 'label', name: 'lblInfo', caption: '', x: 20, y: 196, w: 400, h: 24 }
         ]
       },
+      test: { input: { e_zahl1: '2,5', e_zahl2: '4' }, select: { o_rechenart: 3 }, click: 'btnBerechnen', expect: { a_ergebnis: '10' } },
       code: L(`
 Option Explicit
 
 Private Sub Form_Load()
-    E_Rechenart = 1
+    o_rechenart = 1
     lblInfo.Caption = "Zahlen eingeben und auf Berechnen klicken."
 End Sub
 
 Private Sub btnBerechnen_Click()
     Dim zahl1 As Double, zahl2 As Double, ergebnis As Double
 
-    If IsNull(E_Zahl1) Or IsNull(E_Zahl2) Then
+    If IsNull(e_zahl1) Or IsNull(e_zahl2) Then
         MsgBox "Bitte beide Zahlen eingeben.", vbExclamation
         Exit Sub
     End If
 
-    zahl1 = E_Zahl1          ' Text wird in Double umgewandelt
-    zahl2 = E_Zahl2
+    zahl1 = e_zahl1          ' Text wird in Double umgewandelt
+    zahl2 = e_zahl2
 
-    Select Case E_Rechenart
+    Select Case o_rechenart
         Case 1: ergebnis = zahl1 + zahl2
         Case 2: ergebnis = zahl1 - zahl2
         Case 3: ergebnis = zahl1 * zahl2
     End Select
 
-    A_Ergebnis = ergebnis
+    a_ergebnis = ergebnis
     lblInfo.Caption = "Berechnet um " & Format(Now, "hh:nn:ss")
+End Sub
+`)
+    },
+    {
+      id: 'listbox', title: 'Listenfeld: mehrere Ausgaben untereinander',
+      html: `<p>Ein <b>Listenfeld</b> zeigt mehrere Zeilen untereinander, ideal für Ausgaben in <b>Schleifen</b>. Es funktioniert wie in Access mit einer Wertliste:</p>
+<table class="help-table">
+<tr><th>Code</th><th>Wirkung</th></tr>
+<tr><td><code>lstAusgabe.AddItem "Text"</code></td><td>Zeile unten anfügen</td></tr>
+<tr><td><code>lstAusgabe.AddItem "Text", 0</code></td><td>Zeile an Position 0 (ganz oben) einfügen</td></tr>
+<tr><td><code>lstAusgabe.RowSource = ""</code></td><td>Liste leeren</td></tr>
+<tr><td><code>lstAusgabe.RemoveItem 0</code></td><td>erste Zeile löschen</td></tr>
+<tr><td><code>lstAusgabe.ListCount</code></td><td>Anzahl der Zeilen</td></tr>
+<tr><td><code>lstAusgabe</code> bzw. <code>lstAusgabe.Value</code></td><td>angeklickte Zeile (sonst <code>Null</code>)</td></tr>
+<tr><td><code>lstAusgabe.ListIndex</code></td><td>Nummer der angeklickten Zeile (erste = 0, keine = -1)</td></tr>
+<tr><td><code>lstAusgabe.ItemData(i)</code></td><td>Text der Zeile i</td></tr>
+</table>
+<p class="help-warn"><b>Wie in Access:</b> Die Zählung beginnt bei <b>0</b>. Ein Semikolon trennt Einträge: <code>AddItem "a;b"</code> fügt zwei Zeilen an. Ein Listenfeld fasst höchstens 32.750 Zeichen, sonst kommt Laufzeitfehler 2176. Es gibt keine Methode <code>Clear</code>, geleert wird mit <code>RowSource = ""</code>.</p>
+<p>Ereignisse: <code>lstAusgabe_Click</code> beim Anklicken einer Zeile, <code>_AfterUpdate</code> und <code>_DblClick</code>. Einträge, die schon beim Öffnen da sein sollen, trägst du im Entwurf ein.</p>`,
+      form: {
+        caption: 'Einmaleins', width: 440, height: 300, controls: [
+          { kind: 'textbox', name: 'e_zahl', caption: 'Zahl:', x: 72, y: 20, w: 100, h: 26 },
+          { kind: 'button', name: 'btnAnzeigen', caption: 'Anzeigen', x: 192, y: 17, w: 110, h: 32 },
+          { kind: 'button', name: 'btnLeeren', caption: 'Leeren', x: 312, y: 17, w: 100, h: 32 },
+          { kind: 'listbox', name: 'lstAusgabe', caption: '', x: 20, y: 64, w: 392, h: 184 },
+          { kind: 'label', name: 'lblInfo', caption: '', x: 20, y: 256, w: 392, h: 24 }
+        ]
+      },
+      test: { input: { e_zahl: '7' }, click: 'btnAnzeigen', expect: { lstAusgabe: '1 x 7 = 7|2 x 7 = 14|3 x 7 = 21|4 x 7 = 28|5 x 7 = 35|6 x 7 = 42|7 x 7 = 49|8 x 7 = 56|9 x 7 = 63|10 x 7 = 70' } },
+      code: L(`
+Option Explicit
+
+Private Sub btnAnzeigen_Click()
+    Dim i As Integer, zahl As Integer
+
+    If IsNull(e_zahl) Then
+        MsgBox "Bitte eine Zahl eingeben.", vbExclamation
+        Exit Sub
+    End If
+    zahl = e_zahl
+
+    lstAusgabe.RowSource = ""          ' Liste leeren
+    For i = 1 To 10
+        lstAusgabe.AddItem i & " x " & zahl & " = " & i * zahl
+    Next i
+    lblInfo.Caption = lstAusgabe.ListCount & " Zeilen"
+End Sub
+
+Private Sub btnLeeren_Click()
+    lstAusgabe.RowSource = ""
+    lblInfo.Caption = ""
+End Sub
+
+Private Sub lstAusgabe_Click()
+    lblInfo.Caption = "Angeklickt: Zeile " & lstAusgabe.ListIndex & " – " & lstAusgabe
 End Sub
 `)
     },
@@ -300,6 +359,28 @@ Sub Main()
     Dim zahl As Integer
     zahl = InputBox("Gib etwas ein, das keine Zahl ist:")
     Debug.Print zahl
+End Sub
+`)
+    },
+    {
+      id: 'onerror', title: 'Fehler abfangen: On Error',
+      html: `<p>Mit <code>On Error GoTo Marke</code> springt das Programm bei einem Laufzeitfehler zur Sprungmarke, statt abzubrechen. Dort stehen in <code>Err.Number</code> und <code>Err.Description</code> Nummer und Text des Fehlers.</p>
+<ul>
+<li><code>Resume Next</code> macht nach der Fehlerzeile weiter, <code>Resume Marke</code> an einer anderen Stelle.</li>
+<li><code>On Error Resume Next</code> übergeht Fehler einfach (sparsam einsetzen!), <code>On Error GoTo 0</code> schaltet das Abfangen wieder aus.</li>
+<li>Vor die Sprungmarke gehört <code>Exit Sub</code>, sonst läuft das Programm auch ohne Fehler in die Fehlerbehandlung.</li>
+<li>Sprungmarken stehen wie in Access am Zeilenanfang mit Doppelpunkt, z. B. <code>Fehler:</code>.</li>
+</ul>
+<p>Mit <code>Stop</code> hältst du das Programm an einer Stelle an; danach kannst du es fortsetzen oder beenden.</p>`,
+      code: L(`
+Sub Main()
+    Dim zahl As Integer
+    On Error GoTo Fehler
+    zahl = InputBox("Gib eine Zahl ein:")
+    Debug.Print "100 / " & zahl & " = " & 100 / zahl
+    Exit Sub
+Fehler:
+    MsgBox "Fehler " & Err.Number & ": " & Err.Description, vbExclamation
 End Sub
 `)
     }

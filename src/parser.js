@@ -15,6 +15,8 @@
   'use strict';
   const { syntaxError, tokenize } = deps;
 
+  // Eigenschaften/Methoden des Formulars selbst (Me.Caption, Me.Refresh …)
+  const FORM_MEMBERS = new Set(['caption', 'refresh', 'requery', 'recalc', 'repaint']);
   const TYPE_NAMES = {
     integer: 'integer', long: 'long', double: 'double', single: 'single', currency: 'currency',
     string: 'string', boolean: 'boolean', date: 'date', variant: 'variant', byte: 'byte',
@@ -247,6 +249,7 @@
         this.expectOp(')');
       }
       if (kind === 'function' && this.acceptKw('as')) proc.returnType = this.parseType();
+      else if (kind === 'function' && nameTok.typeChar) proc.returnType = nameTok.typeChar;
       this.expectEOS();
       if (kind === 'function') this.declNames.set(proc.lower, proc.line);
 
@@ -273,6 +276,7 @@
       p.name = nameTok.value; p.lower = nameTok.lower;
       if (this.acceptOp('(')) { this.expectOp(')'); p.isArray = true; }
       if (this.acceptKw('as')) p.type = this.parseType();
+      else if (nameTok.typeChar) p.type = nameTok.typeChar;
       if (this.acceptOp('=')) {
         if (!p.optional) throw syntaxError(`Ein Standardwert ist nur bei Optional-Parametern erlaubt ('${p.name}').`, p.line);
         p.defaultExpr = this.parseExpr();
@@ -365,19 +369,88 @@
           case 'private': case 'public':
             throw syntaxError(`'${t.raw}' ist innerhalb einer Prozedur nicht erlaubt – verwende Dim.`, line);
           case 'with': throw syntaxError('With-Blöcke werden (noch) nicht unterstützt.', line);
-          case 'goto': throw syntaxError('GoTo wird nicht unterstützt. Verwende Schleifen und If-Abfragen.', line);
+          case 'goto': {
+            this.next();
+            const lab = this.parseLabelRef('GoTo');
+            this.expectEOS();
+            return { type: 'GoTo', label: lab.lower, labelName: lab.name, line };
+          }
           default:
             throw syntaxError(`Unerwartetes Schlüsselwort '${t.raw || t.value}'.`, line);
         }
       }
       if (t.type === 'ident') {
-        if (t.lower === 'debug' && this.isOp('.', 1)) return this.parseDebug();
-        if (t.lower === 'on' && this.isIdent('error', 1)) {
-          throw syntaxError('On Error wird (noch) nicht unterstützt.', line);
+        // Sprungmarke "Fehler:" am Anfang der Anweisung
+        const prev = this.tokens[this.pos - 1];
+        if (this.peek(1).type === 'colon' && !t.bracketed && (!prev || prev.type === 'nl') && !this.inlineIf) {
+          this.next();
+          return { type: 'Label', name: t.value, lower: t.lower, line };
         }
+        if (t.lower === 'debug' && this.isOp('.', 1)) return this.parseDebug();
+        if (t.lower === 'on' && this.isIdent('error', 1)) return this.parseOnError(line);
+        if (t.lower === 'resume' && !this.isOp('=', 1) && !this.isOp('.', 1)) return this.parseResume(line);
+        if (t.lower === 'stop' && this.atEOS(1)) { this.next(); return { type: 'Stop', line }; }
         return this.parseAssignOrCall(false);
       }
       throw syntaxError(`Unerwartet: ${this.describe(t)}. Hier wird eine Anweisung erwartet.`, line);
+    }
+
+    /** Name einer Sprungmarke nach GoTo/Resume */
+    parseLabelRef(what) {
+      const t = this.peek();
+      if (t.type === 'ident') { this.next(); return { name: t.value, lower: t.lower }; }
+      if (t.type === 'num') { this.next(); return { name: String(t.value), lower: String(t.value) }; }
+      throw syntaxError(`Erwartet: Name einer Sprungmarke nach '${what}'.`, t.line);
+    }
+
+    parseOnError(line) {
+      this.next(); this.next(); // On Error
+      if (this.acceptKw('goto')) {
+        const lab = this.parseLabelRef('On Error GoTo');
+        this.expectEOS();
+        if (lab.lower === '0') return { type: 'OnError', mode: 'off', line };
+        if (lab.lower === '-1') return { type: 'OnError', mode: 'reset', line };
+        return { type: 'OnError', mode: 'goto', label: lab.lower, labelName: lab.name, line };
+      }
+      if (this.isIdent('resume')) {
+        this.next();
+        if (!this.acceptKw('next')) throw syntaxError("Erwartet: 'Next' nach 'On Error Resume'.", line);
+        this.expectEOS();
+        return { type: 'OnError', mode: 'next', line };
+      }
+      throw syntaxError("Erwartet: 'GoTo' oder 'Resume Next' nach 'On Error'.", line);
+    }
+
+    parseResume(line) {
+      this.next();
+      if (this.atEOS()) return { type: 'Resume', mode: 'retry', line };
+      if (this.acceptKw('next')) { this.expectEOS(); return { type: 'Resume', mode: 'next', line }; }
+      const lab = this.parseLabelRef('Resume');
+      this.expectEOS();
+      if (lab.lower === '0') return { type: 'Resume', mode: 'retry', line };
+      return { type: 'Resume', mode: 'label', label: lab.lower, labelName: lab.name, line };
+    }
+
+    /** Me("e_zahl1") → wie Me.e_zahl1 (nur mit festem Text) */
+    meIndexName() {
+      if (this.isOp('(') && this.peek(1).type === 'str' && this.isOp(')', 2)) {
+        this.next();
+        const s = this.next();
+        this.next();
+        return { value: s.value, lower: s.value.toLowerCase(), line: s.line };
+      }
+      return null;
+    }
+
+    /** Me("x") bzw. Me("x").Value */
+    parseMeIndexed(meTok, name) {
+      let node = { type: 'Ident', name: name.value, lower: name.lower, line: meTok.line, viaMe: true };
+      if (this.isOp('.')) {
+        this.next();
+        const p = this.expectIdent('Eigenschaft');
+        node = { type: 'Member', object: name.value, objLower: name.lower, prop: p.value, propLower: p.lower, line: meTok.line };
+      }
+      return node;
     }
 
     parseVarList(isStatic) {
@@ -393,7 +466,7 @@
         if (this.acceptKw('as')) {
           if (this.isKw('new')) throw syntaxError("'As New' (Objekte) wird nicht unterstützt.", this.line());
           d.varType = this.parseType();
-        }
+        } else if (nameTok.typeChar) d.varType = nameTok.typeChar;
         this.declare(d.name, d.lower, d.line);
         decls.push(d);
       } while (this.acceptOp(','));
@@ -423,6 +496,7 @@
         const nameTok = this.expectIdent('Konstantenname');
         const d = { type: 'ConstDecl', name: nameTok.value, lower: nameTok.lower, varType: 'variant', expr: null, line: nameTok.line };
         if (this.acceptKw('as')) d.varType = this.parseType();
+        else if (nameTok.typeChar) d.varType = nameTok.typeChar;
         this.expectOp('=');
         d.expr = this.parseExpr();
         this.declare(d.name, d.lower, d.line);
@@ -664,6 +738,12 @@
     parseCallStatement() {
       const line = this.next().line;
       const nameTok = this.expectIdent('Name der Prozedur');
+      if (this.isOp('.')) {
+        const target = this.parseMemberChain(nameTok);
+        this.expectEOS();
+        if (target.type === 'Member') { target.args = target.args || []; return { type: 'MemberCall', target, line }; }
+        return { type: 'Call', name: target.name, lower: target.lower, args: [], line };
+      }
       let args = [];
       if (this.acceptOp('(')) {
         args = this.parseArgList(')');
@@ -717,16 +797,41 @@
         throw syntaxError(`Unerwartet: ${this.describe(nameTok)}. Hier wird eine Anweisung erwartet.`, line);
       }
       this.next();
-      if (this.isOp('.')) {
+      if (nameTok.lower === 'me' && this.isOp('(')) {
+        const nm = this.meIndexName();
+        if (nm) {
+          const target = this.parseMeIndexed(nameTok, nm);
+          if (this.acceptOp('=')) {
+            const value = this.parseExpr();
+            this.expectEOS();
+            return { type: 'Assign', target, value, line };
+          }
+          if (target.type === 'Member' && this.atEOS()) return { type: 'MemberCall', target, line };
+          throw syntaxError("Erwartet: '='.", line);
+        }
+      }
+      if (this.isOp('.') || (this.isOp('!') && nameTok.lower === 'me')) {
         // Steuerelement-Eigenschaft oder -Methode: E_Zahl.Visible = False, E_Zahl.SetFocus, Me.E_Zahl = 5
-        const target = this.parseMemberChain(nameTok);
+        const startPos = this.pos;
+        let target = this.parseMemberChain(nameTok);
+        if (target.args && !this.atEOS() && !this.isOp('=')) {
+          // lstAusgabe.AddItem (i) & " Euro" – die Klammer gehört zum Argument
+          this.pos = startPos;
+          target = this.parseMemberChain(nameTok, true);
+        }
         if (this.acceptOp('=')) {
           const value = this.parseExpr();
           this.expectEOS();
           return { type: 'Assign', target, value, line };
         }
         if (target.type === 'Member' && this.atEOS()) return { type: 'MemberCall', target, line };
-        if (target.type === 'Ident' && this.atEOS()) return { type: 'Call', name: target.name, lower: target.lower, args: [], line };
+        if (target.type === 'Member' && !target.args) {
+          // Methode mit Argumenten ohne Klammern: lstAusgabe.AddItem "Text", 0
+          target.args = this.parseArgList(null);
+          this.expectEOS();
+          return { type: 'MemberCall', target, line };
+        }
+        if (target.type === 'Ident' && this.atEOS()) return { type: 'Call', name: target.name, lower: target.lower, args: [], line, viaMe: target.viaMe };
         throw syntaxError("Erwartet: '='.", line);
       }
 
@@ -777,16 +882,26 @@
      * Me.X wird zu X (mit viaMe), Me.X.Y zu Member(X, Y).
      * Ob es das Objekt/die Eigenschaft gibt, prüft erst der Analyzer.
      */
-    parseMemberChain(objTok) {
+    parseMemberChain(objTok, noParens) {
       const line = objTok.line;
-      this.next(); // .
+      const sep = this.next(); // . oder !
+      if (sep.value === '!' && objTok.lower !== 'me') throw syntaxError(`Unerwartet: '!' nach '${objTok.value}'. Verwende den Punkt, z. B. ${objTok.value}.Value.`, line);
       const m = this.peek();
       if (m.type !== 'ident' && m.type !== 'kw') throw syntaxError('Erwartet: Bezeichner nach dem Punkt.', line);
       this.next();
-      const mName = m.type === 'kw' ? (m.raw || m.value) : m.value;
-      const mLower = mName.toLowerCase();
+      let mName = m.type === 'kw' ? (m.raw || m.value) : m.value;
+      let mLower = mName.toLowerCase();
       let node;
-      if (objTok.lower === 'me') {
+      if (objTok.lower === 'me' && sep.value === '.' && mLower === 'controls') {
+        // Me.Controls("e_zahl1")
+        const nm = this.meIndexName();
+        if (!nm) throw syntaxError('Erwartet: Me.Controls("Name") mit dem Namen in Anführungszeichen.', line);
+        mName = nm.value; mLower = nm.lower;
+      }
+      if (objTok.lower === 'me' && sep.value === '.' && FORM_MEMBERS.has(mLower) && !this.isOp('.') && !this.isOp('!')) {
+        // Eigenschaften und Methoden des Formulars: Me.Caption, Me.Refresh
+        node = { type: 'Member', object: 'Me', objLower: 'me', prop: mName, propLower: mLower, line };
+      } else if (objTok.lower === 'me') {
         node = { type: 'Ident', name: mName, lower: mLower, line, viaMe: true };
         if (this.isOp('.')) {
           this.next();
@@ -797,8 +912,12 @@
         node = { type: 'Member', object: objTok.value, objLower: objTok.lower, prop: mName, propLower: mLower, line };
       }
       if (this.isOp('.')) throw syntaxError(`Methode oder Datenobjekt nicht gefunden: '${objTok.value}.${mName}.…' wird nicht unterstützt.`, line);
-      if (this.isOp('(') && node.type === 'Member') {
-        throw syntaxError(`Methode oder Datenobjekt nicht gefunden: '${node.object}.${node.prop}(…)' wird nicht unterstützt.`, line);
+      if (this.isOp('(') && node.type === 'Member' && !noParens) {
+        // lstAusgabe.ItemData(0), lstAusgabe.Column(0, 1), lstAusgabe.AddItem ("Text")
+        this.next();
+        node.args = this.parseArgList(')');
+        this.expectOp(')');
+        if (this.isOp('.')) throw syntaxError(`Methode oder Datenobjekt nicht gefunden: '${node.object}.${node.prop}(…).…' wird nicht unterstützt.`, line);
       }
       return node;
     }
@@ -873,7 +992,7 @@
       const t = this.peek();
       const line = t.line;
       switch (t.type) {
-        case 'num': this.next(); return { type: 'Num', value: t.value, line };
+        case 'num': this.next(); return { type: 'Num', value: t.value, numType: t.numType || null, line };
         case 'str': this.next(); return { type: 'Str', value: t.value, line };
         case 'date': this.next(); return { type: 'DateLit', raw: t.value, line };
         case 'op':
@@ -891,7 +1010,11 @@
           throw syntaxError(`'${t.raw || t.value}' ist ein Schlüsselwort und kann hier nicht stehen.`, line);
         case 'ident': {
           this.next();
-          if (this.isOp('.')) return this.parseMemberChain(t);
+          if (t.lower === 'me' && this.isOp('(')) {
+            const nm = this.meIndexName();
+            if (nm) return this.parseMeIndexed(t, nm);
+          }
+          if (this.isOp('.') || (this.isOp('!') && t.lower === 'me')) return this.parseMemberChain(t);
           if (this.isOp('(')) {
             this.next();
             const args = this.parseArgList(')');
@@ -915,5 +1038,5 @@
     return p.parseProgram();
   }
 
-  return { parse, Parser, TYPE_NAMES, TYPE_DISPLAY };
+  return { parse, Parser, TYPE_NAMES, TYPE_DISPLAY, FORM_MEMBERS };
 });

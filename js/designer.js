@@ -20,13 +20,26 @@
     textbox: { w: 140, h: 26 },
     label: { w: 160, h: 22 },
     button: { w: 130, h: 32 },
-    optiongroup: { w: 170, h: 0 }
+    optiongroup: { w: 170, h: 0 },
+    listbox: { w: 200, h: 140 }
   };
+  // Standardnamen (Klassenkonvention: e_ Eingabe, a_ Ausgabe, o_ Optionsgruppe)
+  const BASE_NAMES = { input: 'e_eingabe', output: 'a_ausgabe', label: 'lblText', button: 'btnBefehl', optiongroup: 'o_option', listbox: 'lstAusgabe' };
+  // Ereignis, zu dem ein Doppelklick im Entwurf springt
+  const DEFAULT_EVENT = { button: 'Click', label: 'Click', textbox: 'AfterUpdate', optiongroup: 'AfterUpdate', listbox: 'Click' };
 
   class FormDesigner {
     constructor(o) {
       this.canvas = o.canvas;
       this.props = o.props;
+      this.titleEl = o.title || null;
+      this.stage = o.stage || null;
+      this.fitEl = o.fit || null;
+      this.scroller = o.scroller || null;
+      this.scale = 1;
+      if (this.scroller && typeof ResizeObserver === 'function') {
+        new ResizeObserver(() => this.fit()).observe(this.scroller);
+      }
       this.onChange = o.onChange || (() => {});
       this.onEvent = o.onEvent || (() => {});
       this.onEventProc = o.onEventProc || (() => {});
@@ -71,13 +84,12 @@
     }
 
     add(kind, variant) {
-      const bases = { textbox: variant === 'output' ? 'A_Ausgabe' : 'E_Eingabe', label: 'lblText', button: 'btnBefehl', optiongroup: 'E_Auswahl' };
-      const name = this.uniqueName(bases[kind]);
+      const name = this.uniqueName(BASE_NAMES[kind === 'textbox' ? (variant === 'output' ? 'output' : 'input') : kind]);
       const bottom = this.model.controls.reduce((m, c) => Math.max(m, c.y + c.h), 0);
       const c = {
         kind, name,
         caption: kind === 'textbox' ? (variant === 'output' ? 'Ergebnis:' : 'Eingabe:')
-          : kind === 'label' ? 'Bezeichnung' : kind === 'button' ? 'Schaltfläche' : 'Auswahl',
+          : kind === 'label' ? 'Bezeichnung' : kind === 'button' ? 'Schaltfläche' : kind === 'listbox' ? '' : 'Auswahl',
         x: kind === 'textbox' ? 104 : 16, y: snap(bottom + 12), w: DEFAULTS[kind].w, h: DEFAULTS[kind].h
       };
       if (kind === 'optiongroup') {
@@ -115,8 +127,29 @@
       this.render();
     }
 
+    /** Titelzeile des Formulars (Beschriftung, in der Formularansicht änderbar mit Me.Caption) */
+    setTitle(text) { if (this.titleEl) this.titleEl.textContent = text; }
+
+    /** Formular auf schmalen Bildschirmen verkleinern, damit nichts rechts abgeschnitten wird */
+    fit() {
+      if (!this.stage || !this.fitEl || !this.scroller) return;
+      const avail = this.scroller.clientWidth - 22;
+      const w = this.model.width + 2;
+      const scale = avail > 100 && avail < w ? Math.max(0.45, avail / w) : 1;
+      this.scale = scale;
+      if (scale === 1) {
+        this.stage.style.transform = '';
+        this.fitEl.style.width = ''; this.fitEl.style.height = '';
+        return;
+      }
+      this.stage.style.transform = `scale(${scale})`;
+      this.fitEl.style.width = Math.floor(w * scale) + 'px';
+      this.fitEl.style.height = Math.ceil(this.stage.offsetHeight * scale) + 'px';
+    }
+
     render() {
       const m = this.model;
+      this.setTitle(this.mode === 'view' && this.runtime ? this.runtime.caption : (m.caption || 'Formular1'));
       this.canvas.innerHTML = '';
       this.elements.clear();
       this.canvas.style.width = m.width + 'px';
@@ -125,7 +158,7 @@
       this.canvas.classList.toggle('view', this.mode === 'view');
       if (m.controls.length === 0 && this.mode === 'design') {
         const hint = el('div', 'form-empty');
-        hint.innerHTML = 'Noch leer. Lege oben ein <b>Eingabefeld (E_)</b>, ein <b>Ausgabefeld (A_)</b> oder eine <b>Schaltfläche</b> an.';
+        hint.innerHTML = 'Noch leer. Lege oben ein <b>Eingabefeld (e_)</b>, ein <b>Ausgabefeld (a_)</b>, eine <b>Schaltfläche</b> oder ein <b>Listenfeld</b> an.';
         this.canvas.appendChild(hint);
       }
       for (const c of m.controls) {
@@ -140,6 +173,7 @@
       }
       if (this.mode === 'design') this.select(this.selected && this.find(this.selected) ? this.selected : null);
       else this.props.innerHTML = '';
+      this.fit();
     }
 
     inner(c, interactive) {
@@ -177,6 +211,18 @@
           });
           return fs;
         }
+        case 'listbox': {
+          const ul = el('ul', 'ctl-list');
+          ul.setAttribute('role', 'listbox');
+          ul.setAttribute('aria-label', c.caption || c.name);
+          if (interactive) ul.tabIndex = 0;
+          else {
+            const items = VBA.splitValueList(c.rowSource || '').filter((t) => t !== '');
+            if (items.length) items.slice(0, 50).forEach((t) => ul.appendChild(el('li', '', t)));
+            else ul.appendChild(el('li', 'placeholder', c.name + '  (leer)'));
+          }
+          return ul;
+        }
         default: return el('div');
       }
     }
@@ -191,8 +237,7 @@
 
       // Doppelklick: zur Ereignisprozedur springen (wie in Access)
       wrap.addEventListener('dblclick', () => {
-        const ev = { button: 'Click', label: 'Click', textbox: 'AfterUpdate', optiongroup: 'AfterUpdate' }[c.kind];
-        this.onEventProc(c.name + '_' + ev);
+        this.onEventProc(c.name + '_' + DEFAULT_EVENT[c.kind]);
       });
       // Verschieben
       wrap.addEventListener('pointerdown', (e) => {
@@ -204,8 +249,8 @@
         let moved = false;
         wrap.setPointerCapture(e.pointerId);
         const move = (ev) => {
-          const nx = Math.max(0, Math.min(this.model.width - 20, snap(ox + ev.clientX - sx)));
-          const ny = Math.max(0, Math.min(this.model.height - 10, snap(oy + ev.clientY - sy)));
+          const nx = Math.max(0, Math.min(this.model.width - 20, snap(ox + (ev.clientX - sx) / this.scale)));
+          const ny = Math.max(0, Math.min(this.model.height - 10, snap(oy + (ev.clientY - sy) / this.scale)));
           if (nx !== c.x || ny !== c.y) { moved = true; c.x = nx; c.y = ny; wrap.style.left = nx + 'px'; wrap.style.top = ny + 'px'; }
         };
         const up = () => {
@@ -225,8 +270,8 @@
         const sx = e.clientX, sy = e.clientY, ow = c.w, oh = c.h;
         handle.setPointerCapture(e.pointerId);
         const move = (ev) => {
-          c.w = Math.max(40, snap(ow + ev.clientX - sx));
-          c.h = Math.max(c.kind === 'optiongroup' ? this.groupHeight(c) : 18, snap(oh + ev.clientY - sy));
+          c.w = Math.max(40, snap(ow + (ev.clientX - sx) / this.scale));
+          c.h = Math.max(c.kind === 'optiongroup' ? this.groupHeight(c) : 18, snap(oh + (ev.clientY - sy) / this.scale));
           wrap.style.width = c.w + 'px'; wrap.style.height = c.h + 'px';
         };
         const up = () => {
@@ -271,6 +316,25 @@
             this.onEvent(c.name, 'Click').then(() => this.onEvent(c.name, 'AfterUpdate'));
           });
         });
+      } else if (c.kind === 'listbox') {
+        const ul = content;
+        const choose = (i) => {
+          const s = rt.get(c.name);
+          if (!s || !s.enabled || s.locked || i < 0 || i >= s.items.length || i === s.listIndex) return;
+          rt.userSelect(c.name, i);
+          this.updateControl(c.name);
+          this.onEvent(c.name, 'Click').then(() => this.onEvent(c.name, 'AfterUpdate'));
+        };
+        ul.addEventListener('click', (e) => {
+          const li = e.target.closest('li');
+          if (li) choose(Number(li.dataset.i));
+        });
+        ul.addEventListener('dblclick', (e) => { if (e.target.closest('li')) this.onEvent(c.name, 'DblClick'); });
+        ul.addEventListener('keydown', (e) => {
+          const s = rt.get(c.name);
+          const d = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+          if (d && s) { e.preventDefault(); choose(Math.max(0, Math.min(s.items.length - 1, s.listIndex + d))); }
+        });
       }
       return wrap;
     }
@@ -285,7 +349,7 @@
     focusControl(name) {
       const e = this.elements.get(String(name).toLowerCase());
       if (!e) return;
-      const f = e.querySelector('input:checked') || e.querySelector('input, button');
+      const f = e.querySelector('input:checked') || e.querySelector('input, button, .ctl-list');
       if (f) f.focus();
     }
 
@@ -317,6 +381,27 @@
         b.disabled = !s.enabled;
         b.style.color = css(s.foreColor);
         b.style.backgroundColor = css(s.backColor);
+      } else if (kind === 'listbox') {
+        const ul = e.firstChild;
+        const frag = document.createDocumentFragment();
+        s.items.forEach((t, i) => {
+          const li = document.createElement('li');
+          li.textContent = t === '' ? '\u00a0' : t;
+          li.dataset.i = i;
+          li.setAttribute('role', 'option');
+          if (i === s.listIndex) { li.className = 'sel'; li.setAttribute('aria-selected', 'true'); }
+          frag.appendChild(li);
+        });
+        const top = ul.scrollTop;
+        ul.replaceChildren(frag);
+        ul.scrollTop = top;
+        ul.classList.toggle('disabled', !s.enabled);
+        ul.style.color = css(s.foreColor);
+        ul.style.backgroundColor = css(s.backColor);
+        const sel = ul.querySelector('.sel');
+        if (sel && (sel.offsetTop < ul.scrollTop || sel.offsetTop + sel.offsetHeight > ul.scrollTop + ul.clientHeight)) {
+          ul.scrollTop = sel.offsetTop - 4;
+        }
       } else if (kind === 'optiongroup') {
         e.querySelectorAll('input').forEach((r) => {
           r.checked = typeof s.value === 'number' && Number(r.value) === s.value;
@@ -353,6 +438,7 @@
 
       if (!c) {
         p.appendChild(el('div', 'prop-title', 'Formular'));
+        row('Beschriftung (Titel, im Code Me.Caption)', text(this.model.caption || '', (v) => { this.model.caption = v; this.changed(); this.render(); }, 'propFormCaption'));
         row('Breite', num(this.model.width, (v) => { this.model.width = Math.max(200, v); this.changed(); this.render(); }, 'propFormW'));
         row('Höhe', num(this.model.height, (v) => { this.model.height = Math.max(120, v); this.changed(); this.render(); }, 'propFormH'));
         const ev = el('div', 'prop-events');
@@ -372,7 +458,7 @@
       void nameInput;
       p.appendChild(err);
       const capLabel = c.kind === 'textbox' ? 'Beschriftung' : c.kind === 'optiongroup' ? 'Überschrift' : 'Beschriftung (Caption)';
-      row(capLabel, text(c.caption || '', (v) => { c.caption = v; this.changed(); this.render(); }, 'propCaption'));
+      if (c.kind !== 'listbox') row(capLabel, text(c.caption || '', (v) => { c.caption = v; this.changed(); this.render(); }, 'propCaption'));
       if (c.kind === 'optiongroup') {
         const ta = el('textarea');
         ta.id = 'propOptions';
@@ -386,6 +472,20 @@
         });
         row('Optionen (eine pro Zeile, Wert 1, 2, 3 …)', ta);
       }
+      if (c.kind === 'listbox') {
+        const ta = el('textarea');
+        ta.id = 'propRowSource';
+        ta.rows = 3;
+        ta.placeholder = 'leer – Einträge per Code mit AddItem';
+        ta.value = VBA.splitValueList(c.rowSource || '').filter((t) => t !== '').join('\n');
+        ta.addEventListener('change', () => {
+          const lines = ta.value.split('\n').map((t) => t.trim()).filter(Boolean);
+          c.rowSource = lines.map((t) => (/[;"']/.test(t) ? '"' + t.replace(/"/g, '') + '"' : t)).join(';');
+          this.changed(); this.render();
+        });
+        row('Einträge beim Start (Wertliste, einer pro Zeile)', ta);
+        p.appendChild(el('div', 'prop-hint', `Per Code: ${c.name}.AddItem "Text" fügt eine Zeile an, ${c.name}.RowSource = "" leert die Liste.`));
+      }
       const pos = el('div', 'prop-grid');
       [['X', 'x'], ['Y', 'y'], ['Breite', 'w'], ['Höhe', 'h']].forEach(([lab, k]) => {
         const r = el('label', 'prop-row small');
@@ -394,8 +494,11 @@
         pos.appendChild(r);
       });
       p.appendChild(pos);
-      if (c.kind === 'textbox' && !/^[EA]_/i.test(c.name)) {
-        p.appendChild(el('div', 'prop-hint', 'Tipp: Eingabefelder beginnen mit E_ (z. B. E_Zahl1), Ausgabefelder mit A_ (z. B. A_Ergebnis).'));
+      if (c.kind === 'textbox' && !/^[ea]_/i.test(c.name)) {
+        p.appendChild(el('div', 'prop-hint', 'Tipp: Eingabefelder beginnen mit e_ (z. B. e_zahl1), Ausgabefelder mit a_ (z. B. a_ergebnis).'));
+      }
+      if (c.kind === 'optiongroup' && !/^o_/i.test(c.name)) {
+        p.appendChild(el('div', 'prop-hint', 'Tipp: Optionsgruppen beginnen mit o_ (z. B. o_rechenart).'));
       }
       const events = VBA.CONTROL_EVENTS[c.kind] || [];
       if (events.length) {

@@ -23,7 +23,7 @@
   const {
     VbaError, runtimeError, EMPTY, NULL, NOTHING, MISSING, VbaDate, VbaArray, TYPE_DISPLAY,
     defaultValue, bankersRound, toNumber, toStr, toBool, coerce, compare, printFormat,
-    BUILTINS, CONSTANTS, SPECIAL_VALUES, resetRandom
+    BUILTINS, CONSTANTS, SPECIAL_VALUES, resetRandom, numberToString, RUNTIME_TEXTS, parseNumberString
   } = V;
 
   // Steuersignale für Exit-Anweisungen
@@ -31,6 +31,13 @@
   const EXIT_DO = { signal: 'do' };
   const EXIT_PROC = { signal: 'proc' };
   class EndSignal { }
+  // Sprung zu einer Sprungmarke (GoTo, Resume Marke) und Verlassen einer Prozedur aus einer Fehlerbehandlung
+  class GotoSignal { constructor(label, frame) { this.label = label; this.frame = frame; } }
+  class ProcExitSignal { constructor(frame) { this.frame = frame; } }
+  class ResumeSignal { constructor(mode, label, frame) { this.mode = mode; this.label = label; this.frame = frame; } }
+
+  const OVERFLOW_RANGE = { byte: [0, 255], integer: [-32768, 32767], long: [-2147483648, 2147483647] };
+  const TYPE_DE = { byte: 'Byte', integer: 'Integer', long: 'Long' };
 
   class Cell {
     constructor(type, value) {
@@ -106,6 +113,8 @@
       this.lastYield = Date.now();
       this.controls = new Map();
       for (const c of o.controls || []) this.controls.set(c.lower, c);
+      this.formAdapter = o.form || null; // Me.Caption, Me.Refresh
+      this.err = { number: 0, description: '', source: '' };
       this.opened = false;
     }
 
@@ -158,7 +167,7 @@
         if (e instanceof EndSignal) {
           // End setzt alle Modulvariablen zurück
           try { this.initGlobals(); } catch (e2) { /* ignorieren */ }
-        } else throw this.normalizeError(e);
+        } else throw this.explainControls(this.normalizeError(e));
       } finally {
         this.flushPrint();
         this.running = false;
@@ -183,6 +192,34 @@
         throw new VbaError('Keine startbare Sub gefunden. Lege eine Sub ohne Parameter an, z. B.:  Sub Main() ... End Sub', null, 'runtime');
       }
       return subs.find((s) => s.lower === 'main') || subs[0];
+    }
+
+    /**
+     * Fehler 94/13 mit einem Steuerelement in der Fehlerzeile: Hinweis mit dem Feldnamen,
+     * z. B. „Das Feld e_zahl1 ist leer (Null).“
+     */
+    explainControls(e) {
+      if (!(e instanceof VbaError) || e.kind !== 'runtime' || (e.number !== 94 && e.number !== 13) || !e.line || !this.controls.size) return e;
+      const names = new Set();
+      const seen = new Set();
+      const walk = (n) => {
+        if (!n || typeof n !== 'object' || seen.has(n)) return;
+        seen.add(n);
+        if (Array.isArray(n)) { n.forEach(walk); return; }
+        if (n.type === 'Ident' && n.line === e.line && this.controls.has(n.lower)) names.add(n.lower);
+        for (const k of Object.keys(n)) if (k !== 'labels' && n[k] && typeof n[k] === 'object') walk(n[k]);
+      };
+      for (const p of this.program.procList) for (const st of p.body) walk(st);
+      const tips = [];
+      for (const l of names) {
+        const c = this.controls.get(l);
+        let v;
+        try { v = c.getValue(null); } catch (x) { continue; }
+        if (e.number === 94 && v === NULL) tips.push(`Das Feld ${c.name} ist leer (Null). Prüfe vorher mit IsNull(${c.name}) oder nutze Nz(${c.name}, 0).`);
+        if (e.number === 13 && typeof v === 'string' && isNaN(parseNumberString(v))) tips.push(`Das Feld ${c.name} enthält „${v}“ – das ist keine Zahl. Prüfe vorher mit IsNumeric(${c.name}).`);
+      }
+      if (tips.length) e.hint = tips.join(' ');
+      return e;
     }
 
     normalizeError(e) {
@@ -271,13 +308,25 @@
       this.steps++;
       if (this.stopped) throw new VbaError('Programm wurde gestoppt.', this.currentLine, 'abort');
       if (this.steps > this.maxSteps) {
-        throw runtimeError(`Das Programm wurde nach ${this.maxSteps.toLocaleString('de-DE')} Schritten abgebrochen – vermutlich eine Endlosschleife. Prüfe die Abbruchbedingung deiner Schleife.`, this.currentLine);
+        const e = runtimeError(`Das Programm wurde nach ${this.maxSteps.toLocaleString('de-DE')} Schritten abgebrochen – vermutlich eine Endlosschleife. Prüfe die Abbruchbedingung deiner Schleife.`, this.currentLine);
+        e.untrappable = true;
+        throw e;
       }
       if ((this.steps & 1023) === 0 && Date.now() - this.lastYield > this.yieldMs) return this.yieldNow();
       return null;
     }
 
     yieldNow() {
+      const now = Date.now();
+      // etwa alle 100 ms richtig abgeben (Bildaufbau, Klick auf Stoppen), sonst nur kurz
+      if (typeof requestAnimationFrame === 'function' && now - (this.lastPaint || 0) > 100) {
+        return new Promise((resolve) => {
+          let done = false;
+          const go = () => { if (done) return; done = true; this.lastPaint = this.lastYield = Date.now(); resolve(); };
+          requestAnimationFrame(() => setTimeout(go, 0));
+          setTimeout(go, 50); // falls der Tab im Hintergrund ist
+        });
+      }
       return new Promise((resolve) => schedule(() => { this.lastYield = Date.now(); resolve(); }));
     }
 
@@ -289,14 +338,83 @@
       return null;
     }
 
+    /**
+     * Führt eine Anweisung aus. Mit On Error … wird ein Laufzeitfehler hier abgefangen:
+     * Resume Next macht mit der nächsten Anweisung weiter, On Error GoTo Marke führt die
+     * Fehlerbehandlung an Ort und Stelle aus (damit Resume / Resume Next zurückfinden).
+     */
     async exec(s) {
+      const frame = this.frame;
+      if (!frame || !frame.onError || frame.inHandler) return this.execStmt(s);
+      for (;;) {
+        try {
+          return await this.execStmt(s);
+        } catch (e) {
+          if (!(e instanceof VbaError) || e.kind !== 'runtime' || e.untrappable || !frame.onError || frame.inHandler || this.stopped) throw e;
+          this.frame = frame;
+          this.setErr(e);
+          if (frame.onError.mode === 'next') return null;
+          // On Error GoTo Marke
+          frame.inHandler = true;
+          frame.errorLine = e.line;
+          try {
+            await this.runFromLabel(frame, frame.onError.label);
+            throw new ProcExitSignal(frame); // Ende der Prozedur in der Fehlerbehandlung erreicht
+          } catch (r) {
+            if (!(r instanceof ResumeSignal) || r.frame !== frame) throw r;
+            frame.inHandler = false;
+            this.clearErr();
+            if (r.mode === 'next') return null;
+            if (r.mode === 'label') throw new GotoSignal(r.label, frame);
+            // Resume: Anweisung noch einmal ausführen
+          }
+        }
+      }
+    }
+
+    /** Anweisungen der Prozedur ab einer Sprungmarke ausführen (für die Fehlerbehandlung) */
+    async runFromLabel(frame, label) {
+      const body = frame.proc.body;
+      for (let i = frame.proc.labels.get(label); i < body.length; i++) {
+        const sig = await this.exec(body[i]);
+        if (sig === EXIT_PROC) throw new ProcExitSignal(frame);
+        if (sig) return;
+      }
+    }
+
+    /** Rumpf einer Prozedur: Sprünge zu Marken auf oberster Ebene (GoTo, Resume Marke) */
+    async runProcBody(frame) {
+      const body = frame.proc.body;
+      let i = 0;
+      for (;;) {
+        try {
+          for (; i < body.length; i++) {
+            const sig = await this.exec(body[i]);
+            if (sig) return;
+          }
+          return;
+        } catch (e) {
+          if (e instanceof ProcExitSignal && e.frame === frame) return;
+          if (e instanceof GotoSignal && e.frame === frame) { this.frame = frame; i = frame.proc.labels.get(e.label); continue; }
+          throw e;
+        }
+      }
+    }
+
+    async execStmt(s) {
       this.currentLine = s.line;
       const y = this.tick();
       if (y) await y;
       switch (s.type) {
         case 'Assign': return this.execAssign(s);
         case 'Call': await this.execCall(s); return null;
-        case 'MemberCall': this.control(s.target).call(s.target.propLower, s.line); return null;
+        case 'MemberCall': {
+          const args = [];
+          for (const a of s.target.args || []) args.push(a ? await this.ev(a) : MISSING);
+          this.currentLine = s.line;
+          this.control(s.target).call(s.target.propLower, s.line, args);
+          return null;
+        }
         case 'Print': return this.execPrint(s);
         case 'If': {
           for (const b of s.branches) {
@@ -327,6 +445,30 @@
         case 'Assert':
           if (!toBool(await this.ev(s.expr), s.line)) throw runtimeError('Debug.Assert: Die Bedingung ist nicht erfüllt.', s.line);
           return null;
+        case 'Label': return null;
+        case 'GoTo': throw new GotoSignal(s.label, this.frame);
+        case 'OnError': {
+          const f = this.frame;
+          this.clearErr();
+          if (s.mode === 'off' || s.mode === 'reset') { f.onError = null; if (s.mode === 'reset') f.inHandler = false; }
+          else f.onError = { mode: s.mode, label: s.label };
+          return null;
+        }
+        case 'Resume': {
+          const f = this.frame;
+          if (!f.inHandler) throw runtimeError('Resume ohne Fehler: Resume ist nur in einer Fehlerbehandlung (nach On Error GoTo) erlaubt.', s.line, 20);
+          throw new ResumeSignal(s.mode, s.label, f);
+        }
+        case 'Stop': {
+          // wie ein Haltepunkt: anhalten, Zeile markieren, auf Fortsetzen/Beenden warten
+          this.flushPrint();
+          if (typeof this.host.pause === 'function') {
+            const r = await this.host.pause(s.line);
+            this.lastYield = Date.now();
+            if (r === 'end') throw new VbaError('Programm wurde beendet.', s.line, 'abort');
+          }
+          return null;
+        }
         default:
           throw runtimeError(`Unbekannte Anweisung (${s.type}).`, s.line);
       }
@@ -519,7 +661,22 @@
             continue;
           }
           endsWithSep = false;
-          const v = it.expr.async ? await this.ev(it.expr) : this.evalSync(it.expr);
+          const e = it.expr;
+          if (e.inPrint) {
+            // Tab(n): zur Spalte n springen, Tab ohne Zahl: nächste Druckzone; Spc(n): n Leerzeichen
+            const col = buf.length - (buf.lastIndexOf('\n') + 1);
+            const arg = e.args && e.args[0] ? coerce(await this.ev(e.args[0]), 'long', e.line) : null;
+            if (e.lower === 'spc') buf += ' '.repeat(Math.max(0, arg));
+            else if (arg === null) buf += ' '.repeat(14 - (col % 14));
+            else {
+              const target = Math.max(1, arg) - 1;
+              if (col > target) buf += '\n' + ' '.repeat(target);
+              else buf += ' '.repeat(target - col);
+            }
+            endsWithSep = true; // nach Tab/Spc geht es in derselben Zeile weiter
+            continue;
+          }
+          const v = e.async ? await this.ev(e) : this.evalSync(e);
           buf += printFormat(v);
         }
         if (endsWithSep) {
@@ -638,7 +795,9 @@
           continue;
         }
         if (p.byRef) {
-          const ref = await this.refFor(node);
+          let ref = await this.refFor(node);
+          // Ein Steuerelement ist keine Variable: an einen Parameter mit Datentyp wird sein Wert übergeben (wie in Access)
+          if (ref instanceof ControlCell && p.type !== 'variant') ref = null;
           if (ref) {
             const refIsArray = ref.isArray || ref.value instanceof VbaArray;
             if (p.isArray && !refIsArray) {
@@ -665,13 +824,15 @@
 
       const savedFrame = this.frame;
       const savedLine = this.currentLine;
-      const frame = { proc, locals };
+      const frame = { proc, locals, onError: null, inHandler: false };
       this.frames.push(frame);
       this.frame = frame;
       try {
         if (proc.kind === 'function') locals.set(proc.lower, new Cell(proc.returnType, defaultValue(proc.returnType)));
         for (const d of proc.decls) this.declare(d, locals);
-        await this.execBlock(proc.body);
+        if (proc.labels && proc.labels.size) await this.runProcBody(frame);
+        else await this.execBlock(proc.body);
+        if (frame.onError) this.clearErr(); // Err wird beim Verlassen einer Prozedur mit Fehlerbehandlung zurückgesetzt
         this.currentLine = savedLine; // nur bei Erfolg: bei Fehlern bleibt die Fehlerzeile stehen
         return proc.kind === 'function' ? locals.get(proc.lower).value : EMPTY;
       } finally {
@@ -691,11 +852,18 @@
         case 'DateLit': return node.value;
         case 'Nothing': return NOTHING;
         case 'Paren': return this.evalSync(node.expr);
-        case 'Unary': return this.applyUnary(node.op, this.evalSync(node.operand), node.line);
-        case 'Bin': return this.applyBinary(node.op, this.evalSync(node.left), this.evalSync(node.right), node.line);
-        case 'Ident': return this.readIdentSync(node);
-        case 'Member': return this.control(node).get(node.propLower, node.line);
+        case 'Unary': {
+          const r = this.applyUnary(node.op, this.evalSync(node.operand), node.line);
+          return node.ovf ? this.checkOverflow(r, node) : r;
+        }
+        case 'Bin': {
+          const r = this.applyBinary(node.op, this.evalSync(node.left), this.evalSync(node.right), node.line);
+          return node.ovf ? this.checkOverflow(r, node) : r;
+        }
+        case 'Ident': return node.errNumber ? this.err.number : this.readIdentSync(node);
+        case 'Member': return this.control(node).get(node.propLower, node.line, (node.args || []).map((a) => (a ? this.evalSync(a) : MISSING)));
         case 'CallOrIndex': {
+          if (node.lenBytes) return node.lenBytes;
           const cell = this.findCell(node.lower);
           if (cell && cell.value instanceof VbaArray) {
             const idx = node.args.map((a) => {
@@ -721,11 +889,15 @@
     async evalAsync(node) {
       switch (node.type) {
         case 'Paren': return this.ev(node.expr);
-        case 'Unary': return this.applyUnary(node.op, await this.ev(node.operand), node.line);
+        case 'Unary': {
+          const r = this.applyUnary(node.op, await this.ev(node.operand), node.line);
+          return node.ovf ? this.checkOverflow(r, node) : r;
+        }
         case 'Bin': {
           const l = await this.ev(node.left);
           const r = await this.ev(node.right);
-          return this.applyBinary(node.op, l, r, node.line);
+          const v = this.applyBinary(node.op, l, r, node.line);
+          return node.ovf ? this.checkOverflow(v, node) : v;
         }
         case 'Ident': {
           const cell = this.findCell(node.lower);
@@ -754,15 +926,83 @@
           const idx = await this.evalIndices(node.args, node.line);
           return this.indexValue(target, idx, node.line);
         }
+        case 'Member': {
+          const args = [];
+          for (const a of node.args || []) args.push(a ? await this.ev(a) : MISSING);
+          return this.control(node).get(node.propLower, node.line, args);
+        }
         default: return this.evalSync(node);
       }
     }
 
+    /** Überlauf wie in Access: Integer * Integer bleibt Integer (200 * 200 → Laufzeitfehler 6) */
+    checkOverflow(v, node) {
+      if (typeof v !== 'number') return v;
+      const [lo, hi] = OVERFLOW_RANGE[node.ovf];
+      if (v < lo || v > hi) {
+        const t = TYPE_DE[node.ovf];
+        throw runtimeError(`Überlauf: Beide Werte sind vom Typ ${t}, daher rechnet VBA auch das Ergebnis (${numberToString(v)}) als ${t} – und das passt nicht hinein (${t} reicht von ${numberToString(lo)} bis ${numberToString(hi)}). ` +
+          (node.ovf === 'long' ? 'Rechne mit Double, z. B. CDbl(a) * b.' : 'Rechne mit Long, z. B. CLng(a) * b oder 200& * 200.'), node.line, 6);
+      }
+      return v;
+    }
+
     control(node) {
+      if (node.special) return this.specialObject(node);
       const c = this.controls.get(node.objLower);
       if (!c) throw runtimeError(`Objekt erforderlich: Es gibt kein Steuerelement '${node.object}'.`, node.line, 424);
       return c;
     }
+
+    /** Me (Formular), Err und DoCmd mit derselben Schnittstelle wie Steuerelemente */
+    specialObject(node) {
+      const self = this;
+      const host = this.host;
+      if (node.special === 'err') {
+        return {
+          get(p) { return p === 'number' ? self.err.number : p === 'description' ? self.err.description : self.err.source; },
+          set(p, v, line) {
+            if (p === 'number') { self.err.number = coerce(v, 'long', line); if (!self.err.description) self.err.description = RUNTIME_TEXTS[self.err.number] || ''; }
+            else if (p === 'description') self.err.description = toStr(v, line);
+            else self.err.source = toStr(v, line);
+          },
+          call(p, line, args) {
+            if (p === 'clear') { self.clearErr(); return; }
+            // Err.Raise Nummer, [Quelle], [Beschreibung]
+            const num = coerce(args[0], 'long', line);
+            const desc = args.length > 2 && args[2] !== MISSING ? toStr(args[2], line) : (RUNTIME_TEXTS[num] || 'Anwendungs- oder objektdefinierter Fehler');
+            const e = runtimeError(desc, line, num);
+            e.accessMessage = desc;
+            e.raisedSource = args.length > 1 && args[1] !== MISSING ? toStr(args[1], line) : '';
+            throw e;
+          }
+        };
+      }
+      if (node.special === 'docmd') {
+        return {
+          get() { return EMPTY; }, set() {},
+          call(p) {
+            if (p === 'beep') return;
+            // DoCmd.Close: Formular schließen (die Oberfläche wechselt nach dem Ereignis in den Entwurf)
+            if (typeof host.closeForm === 'function') host.closeForm();
+          }
+        };
+      }
+      // Me: das Formular selbst
+      const form = this.formAdapter;
+      return {
+        get(p) { return p === 'caption' ? (form ? form.getCaption() : '') : EMPTY; },
+        set(p, v, line) { if (p === 'caption' && form) form.setCaption(toStr(v, line)); },
+        call(p) { if (form && form.refresh) form.refresh(); }
+      };
+    }
+
+    setErr(e) {
+      this.err.number = e.number || 5;
+      this.err.description = e.accessMessage || e.plainMessage || '';
+      this.err.source = e.raisedSource || '';
+    }
+    clearErr() { this.err.number = 0; this.err.description = ''; this.err.source = ''; }
 
     indexValue(target, idx, line) {
       if (!(target instanceof VbaArray)) throw runtimeError('Typen unverträglich: Hier wird ein Array erwartet.', line, 13);
