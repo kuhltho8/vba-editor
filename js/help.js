@@ -16,7 +16,8 @@
 <li>Klicke auf <b>▶ Ausführen</b> (oder drücke <kbd>F5</kbd>).</li>
 <li>Hängt das Programm in einer Endlosschleife, beendest du es mit <b>■ Stoppen</b>.</li>
 </ol>
-<p>Mit <b>Neu</b> bekommst du wieder das leere Grundgerüst.</p>
+<p>Unter <b>Datei ▾</b> findest du <b>Neu</b> (leeres Grundgerüst), <b>Öffnen</b> und <b>Speichern</b>. Formular und Hilfe erscheinen rechts in einer gemeinsamen Seitenleiste mit Reitern; ihre Breite kannst du am Trenner verschieben. Mit <b>A−</b> und <b>A+</b> stellst du die Schriftgröße von Code und Direktfenster ein (z. B. für den Beamer).</p>
+<p><b>Am Handy:</b> ▶ Ausführen liegt unten rechts. Beim Tippen erscheint über der Tastatur eine Leiste mit <code>" ( ) = &amp; _ '</code> und weiteren Zeichen. Der rote Knopf ganz links schließt den offenen Block mit dem passenden Wort (<code>End If</code>, <code>Next</code>, <code>Loop</code> …). Die Schriftgröße findest du dort im Menü <b>Datei</b>.</p>
 <p><b>Live-Hilfe beim Tippen</b> wie im VBA-Editor: Tippst du z. B. <code>MsgBox </code>, zeigt ein gelbes Feld die Syntax, der aktuelle Parameter ist fett. Ab zwei Buchstaben (z. B. <code>vb</code>) erscheint eine Vorschlagsliste, nach <code>lstAusgabe.</code> die Eigenschaften und Methoden. Übernehmen mit <kbd>Tab</kbd>, <kbd>Enter</kbd> oder Doppelklick (am Handy antippen), schließen mit <kbd>Esc</kbd>. <kbd>Strg</kbd>+<kbd>Leertaste</kbd> öffnet die Liste jederzeit.</p>`,
       code: L(`
 Private Sub Main()
@@ -236,7 +237,7 @@ End Sub
     {
       id: 'forms', title: 'Formulare wie in Access',
       html: `<p>Im Bereich <b>Formular</b> baust du eine Oberfläche wie in Access. In der <b>Entwurfsansicht</b> legst du Steuerelemente an, verschiebst sie und gibst ihnen Namen. In der <b>Formularansicht</b> (oder mit <b>▶ Ausführen</b>) benutzt du das Formular.</p>
-<p>Mit dem Button <b>▭ Formular</b> oben blendest du den Formularbereich rechts ein und aus. Eingeblendet ist er gleich in der Formularansicht: Ein Klick auf eine Schaltfläche führt ihren Code aus.</p>
+<p>Mit dem Button <b>▭ Formular</b> oben blendest du das Formular in der Seitenleiste rechts ein und aus (auf dem Handy als eigener Reiter). Eingeblendet ist es gleich in der Formularansicht: Ein Klick auf eine Schaltfläche führt ihren Code aus. Über den Reiter <b>Hilfe</b> kannst du zwischendurch nachlesen, das Formular bleibt dabei geöffnet.</p>
 <p class="help-warn"><b>Namenskonvention:</b> Eingabefelder beginnen mit <code>e_</code> (z. B. <code>e_zahl1</code>), Ausgabefelder mit <code>a_</code> (z. B. <code>a_ergebnis</code>), Optionsgruppen mit <code>o_</code> (z. B. <code>o_rechenart</code>). Schaltflächen beginnen mit <code>btn</code> (z. B. <code>btnBerechnen</code>), Listenfelder mit <code>lst</code>.</p>
 <p><b>Zugriff ohne <code>Me.</code></b>, direkt über den Namen:</p>
 <ul>

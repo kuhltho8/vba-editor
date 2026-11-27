@@ -70,7 +70,7 @@ Die Schüler arbeiten im Unterricht selten mit Debug.Print, deshalb ist eine gut
   - Lesen: `zahl1 = e_eingabe1`
   - Schreiben: `a_ausgabe1 = summe`
 - Listenfeld (Wertliste wie in Access) für mehrere Ausgaben in Schleifen: `AddItem`, `RemoveItem`, `RowSource = ""` zum Leeren, `ListCount`, `ListIndex`, `ItemData(i)`, `Value`.
-- Layout: Code oben, Direktfenster darunter (kleiner, Trenner verschiebbar); Formular per Button „Formular“ rechts über die volle Höhe einblendbar.
+- Layout: Code oben, Direktfenster darunter (kleiner, Trenner verschiebbar); rechts eine Seitenleiste mit Reitern „Formular“ und „Hilfe“ (nie drei Spalten, Breite verschiebbar), per Button „Formular“ bzw. „Hilfe“ einblendbar. Toolbar gruppiert: Datei ▾ | Start-Sub, Ausführen, Stoppen | Formular, Hilfe (Wunsch Thomas, 27.11.2026). Schriftgröße A−/A+ für Code und Direktfenster; Handy: ▶ als schwebender Knopf, Zeichenleiste über der Tastatur. Keine Aufgaben-/Verteil-/Prüffunktionen einbauen (Thomas, 27.11.2026).
 - Werte aus Textfeldern kommen als String/Variant; Verhalten möglichst wie in Access (z. B. Val/CDbl nötig bzw. automatische Typumwandlung wie bei Variant).
 - Formular und Code gemeinsam speichern und laden.
 

@@ -158,7 +158,7 @@
       this.canvas.classList.toggle('view', this.mode === 'view');
       if (m.controls.length === 0 && this.mode === 'design') {
         const hint = el('div', 'form-empty');
-        hint.innerHTML = 'Noch leer. Lege oben ein <b>Eingabefeld (e_)</b>, ein <b>Ausgabefeld (a_)</b>, eine <b>Schaltfläche</b> oder ein <b>Listenfeld</b> an.';
+        hint.innerHTML = '<span>Noch leer. Lege oben ein <b>Eingabefeld (e_)</b>, ein <b>Ausgabefeld (a_)</b>, eine <b>Schaltfläche</b> oder ein <b>Listenfeld</b> an.</span>'; // ein Element, sonst zerfällt der Text im Flex-Container
         this.canvas.appendChild(hint);
       }
       for (const c of m.controls) {

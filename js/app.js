@@ -1,6 +1,6 @@
 /*
- * app.js – Oberfläche: Editor, Konsole, Dialoge, Formular (Entwurf/Formularansicht),
- * Hilfe, Neu/Rückgängig, Speichern/Öffnen.
+ * app.js – Oberfläche: Editor, Konsole, Dialoge, Seitenleiste mit Formular (Entwurf/Formularansicht)
+ * und Hilfe, Neu/Rückgängig, Speichern/Öffnen.
  */
 (function () {
   'use strict';
@@ -112,6 +112,7 @@
       o.value = o.textContent = s.name;
       entry.appendChild(o);
     }
+    document.body.classList.toggle('one-entry', entry.options.length <= 1); // Handy: Auswahl nur bei mehreren Subs
     if (subs.some((s) => s.name === prev)) entry.value = prev;
     else { const main = subs.find((s) => s.name.toLowerCase() === 'main'); if (main) entry.value = main.name; }
   }
@@ -449,35 +450,92 @@
     }
   }
 
-  // ---------- Formular ein-/ausblenden ----------
-  const btnForm = $('btnForm');
+  // ---------- Seitenleiste: Reiter „Formular“ und „Hilfe“ ----------
+  // Am PC liegen Formular und Hilfe rechts in einer gemeinsamen Spalte, damit der Code breit bleibt.
+  // Auf dem Handy ist das Formular ein eigener Reiter und die Hilfe ein Vollbild.
+  const btnForm = $('btnForm'), btnHelp = $('btnHelp'), help = $('helpPanel');
+  const sideTabForm = $('sideTabForm'), sideTabHelp = $('sideTabHelp');
   const FORM_VISIBLE_KEY = 'vba-editor-form-visible';
-  document.body.classList.add('form-hidden'); // standardmäßig ausgeblendet
-  function formVisible() { return !document.body.classList.contains('form-hidden'); }
+  let sideTab = null;      // 'form' | 'help' | null (Seitenleiste zu)
+  let helpReturn = null;   // 'form', wenn die Hilfe aus dem Formular heraus geöffnet wurde
+  let formTouched = false; // Formular-Reiter seit dem Öffnen der Seitenleiste schon gezeigt?
+
+  function showSide(tab) {
+    sideTab = tab;
+    document.body.classList.toggle('side-closed', !tab);
+    document.body.classList.toggle('form-hidden', tab !== 'form');
+    help.classList.toggle('hidden', tab !== 'help');
+    btnForm.setAttribute('aria-pressed', String(tab === 'form'));
+    btnHelp.setAttribute('aria-pressed', String(tab === 'help'));
+    sideTabForm.setAttribute('aria-selected', String(tab === 'form'));
+    sideTabHelp.setAttribute('aria-selected', String(tab === 'help'));
+    store.set(FORM_VISIBLE_KEY, tab === 'form' || (tab === 'help' && helpReturn === 'form') ? '1' : '0');
+    if (!tab && document.querySelector('.tab.active[data-pane="formPane"]')) showPane('editorPane');
+  }
+  function closeSide() {
+    helpReturn = null;
+    formTouched = false;
+    showSide(null);
+    closeFormView();
+  }
+  /** Formular-Reiter zeigen. Beim ersten Zeigen (oder mit forceView) gleich in der Formularansicht,
+   *  damit Schaltflächen sofort reagieren; beim Zurückwechseln aus der Hilfe bleibt die Ansicht, wie sie war. */
+  async function openFormTab(forceView) {
+    const fresh = forceView || !formTouched;
+    helpReturn = null;
+    formTouched = true;
+    showSide('form');
+    if (fresh && hasForm()) await openFormView();
+  }
   async function setFormVisible(show) {
-    document.body.classList.toggle('form-hidden', !show);
-    btnForm.setAttribute('aria-pressed', String(show));
-    store.set(FORM_VISIBLE_KEY, show ? '1' : '0');
-    if (!show) {
-      closeFormView();
-      if (document.querySelector('.tab.active[data-pane="formPane"]')) showPane('editorPane');
-      return;
-    }
-    // eingeblendet: mit Steuerelementen gleich in der Formularansicht (Buttons sind sofort aktiv)
-    if (hasForm()) await openFormView();
+    if (show) await openFormTab(true); else closeSide();
   }
   btnForm.addEventListener('click', () => {
-    const show = !formVisible();
-    setFormVisible(show);
-    if (show) showPane('formPane');
+    if (sideTab === 'form') { closeSide(); return; }
+    openFormTab(false);
+    showPane('formPane');
   });
+  sideTabForm.addEventListener('click', () => { if (sideTab !== 'form') openFormTab(false); });
+  sideTabHelp.addEventListener('click', () => toggleHelp(true));
+  $('btnSideClose').addEventListener('click', closeSide);
+
+  // ---------- Trenner zwischen Code und Seitenleiste ----------
+  const SIDE_W_KEY = 'vba-editor-side-width';
+  const sidebar = $('sidebar'), sideSplitter = $('sideSplitter');
+  function setSideWidth(px, save) {
+    const w = Math.round(Math.max(280, px));
+    sidebar.style.flexBasis = w + 'px'; // Grenzen (min/max) setzt das CSS
+    if (save) store.set(SIDE_W_KEY, String(w));
+  }
+  const savedSideW = parseFloat(store.get(SIDE_W_KEY));
+  if (isFinite(savedSideW) && savedSideW > 0) setSideWidth(savedSideW, false);
+  sideSplitter.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    sideSplitter.setPointerCapture(e.pointerId);
+    const right = sidebar.getBoundingClientRect().right;
+    const move = (ev) => setSideWidth(right - ev.clientX - sideSplitter.offsetWidth / 2, false);
+    const up = () => {
+      sideSplitter.removeEventListener('pointermove', move);
+      sideSplitter.removeEventListener('pointerup', up);
+      sideSplitter.removeEventListener('pointercancel', up);
+      setSideWidth(sidebar.getBoundingClientRect().width, true);
+    };
+    sideSplitter.addEventListener('pointermove', move);
+    sideSplitter.addEventListener('pointerup', up);
+    sideSplitter.addEventListener('pointercancel', up);
+  });
+  sideSplitter.addEventListener('keydown', (e) => {
+    const d = { ArrowLeft: 40, ArrowRight: -40 }[e.key];
+    if (d) { e.preventDefault(); setSideWidth(sidebar.getBoundingClientRect().width + d, true); }
+  });
+  sideSplitter.addEventListener('dblclick', () => { sidebar.style.flexBasis = ''; store.set(SIDE_W_KEY, ''); });
 
   // ---------- Ausführen ----------
   async function run() {
     markError(null);
     if (hasForm()) {
       // Mit Formular: Formular einblenden, Formularansicht öffnen und ggf. die Start-Sub darin ausführen
-      if (!formVisible()) { document.body.classList.remove('form-hidden'); btnForm.setAttribute('aria-pressed', 'true'); store.set(FORM_VISIBLE_KEY, '1'); }
+      if (sideTab !== 'form') { helpReturn = null; formTouched = true; showSide('form'); }
       const ok = await openFormView();
       if (!ok) return;
       if (entry.value) await invoke(entry.value);
@@ -513,12 +571,135 @@
     if (closeModal) closeModal(null);
   });
   $('btnClear').addEventListener('click', clearConsole);
-  // Menü „⋯“ (nur auf schmalen Bildschirmen sichtbar)
+  // Menü „Datei“ (Neu, Öffnen, Speichern)
   const btnMore = $('btnMore');
   function setMore(open) { document.body.classList.toggle('more-open', open); btnMore.setAttribute('aria-expanded', String(open)); }
   btnMore.addEventListener('click', (e) => { e.stopPropagation(); setMore(!document.body.classList.contains('more-open')); });
   document.addEventListener('click', (e) => { if (!e.target.closest('#btnMore')) setMore(false); });
+  $('moreMenu').addEventListener('focusout', (e) => { if (!e.relatedTarget || !e.relatedTarget.closest('.file-group')) setMore(false); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMore(false); });
+  // ---------- Schriftgröße (A− / A+) für Code und Direktfenster, z. B. für den Beamer ----------
+  const FONT_KEY = 'vba-editor-font-size';
+  const FONT_MIN = 10, FONT_MAX = 32;
+  function codeFontSize() { return parseFloat(getComputedStyle(code).fontSize) || 14; }
+  function setCodeFont(px, save) {
+    const v = Math.max(FONT_MIN, Math.min(FONT_MAX, Math.round(px)));
+    document.documentElement.style.setProperty('--code-size', v + 'px');
+    if (save) store.set(FONT_KEY, String(v));
+    document.querySelectorAll('[data-font]').forEach((b) => {
+      b.disabled = b.dataset.font < 0 ? v <= FONT_MIN : v >= FONT_MAX;
+    });
+    renderGutter();
+    return v;
+  }
+  document.querySelectorAll('[data-font]').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation(); // Datei-Menü bleibt offen, man kann mehrmals tippen
+    setCodeFont(codeFontSize() + 2 * Math.sign(Number(b.dataset.font)), true);
+  }));
+  const savedFont = parseFloat(store.get(FONT_KEY));
+  if (isFinite(savedFont) && savedFont > 0) setCodeFont(savedFont, false);
+
+  // ---------- Zeichenleiste über der Bildschirmtastatur (Handy/Tablet) ----------
+  // Auf der Handytastatur liegen " ( ) = & _ ' auf der zweiten Ebene. Die Leiste erscheint, solange
+  // der Code-Editor auf einem Touch-Gerät den Fokus hat, und schlägt das passende Schlusswort vor.
+  const keyBar = $('keyBar');
+  const touchMq = window.matchMedia ? window.matchMedia('(pointer: coarse)') : { matches: false };
+  const KEYS = [
+    { label: '⇥', text: '    ', title: 'Einrücken (Tab)' },
+    { label: '"' }, { label: '(' }, { label: ')' }, { label: '=' }, { label: '&' }, { label: '_' }, { label: "'" },
+    { label: ',' }, { label: '.' }, { label: '<' }, { label: '>' }, { label: '+' }, { label: '-' }, { label: '*' }, { label: '/' }, { label: ':' },
+    { label: 'Debug.Print', text: 'Debug.Print ', word: true }, { label: 'Dim', text: 'Dim ', word: true },
+    { label: 'As', text: 'As ', word: true }, { label: 'Then', text: 'Then', word: true }
+  ];
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'kb-word kb-close hidden';
+  keyBar.appendChild(closeBtn);
+  for (const k of KEYS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = k.label;
+    if (k.word) b.className = 'kb-word';
+    b.title = k.title || `„${k.text || k.label}“ einfügen`;
+    b.dataset.text = k.text || k.label;
+    keyBar.appendChild(b);
+  }
+  // Fokus im Editor lassen, damit die Tastatur offen bleibt
+  keyBar.addEventListener('pointerdown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+  keyBar.addEventListener('mousedown', (e) => e.preventDefault());
+  keyBar.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b === closeBtn) insertCloser(); else insertText(b.dataset.text);
+    code.focus();
+  });
+  function insertText(t) {
+    code.setRangeText(t, code.selectionStart, code.selectionEnd, 'end');
+    code.dispatchEvent(new Event('input'));
+  }
+  /** Offene Blöcke (If, For, Do, …) bis zum Cursor bestimmen und den innersten liefern. */
+  function openBlock() {
+    const before = code.value.slice(0, code.selectionStart);
+    const lines = before.split('\n'); // inkl. aktueller Zeile bis zum Cursor (gerade eingefügtes End If zählt schon)
+    const stack = [];
+    const RULES = [
+      [/^(?:(?:public|private|static)\s+)*sub\s+\w/, 'End Sub'], [/^(?:(?:public|private|static)\s+)*function\s+\w/, 'End Function'],
+      [/^if\b.*\bthen$/, 'End If'], [/^for\b/, 'Next'], [/^do\b/, 'Loop'], [/^while\b/, 'Wend'], [/^select\s+case\b/, 'End Select']
+    ];
+    const CLOSE = [[/^end\s+sub\b/, 'End Sub'], [/^end\s+function\b/, 'End Function'], [/^end\s+if\b/, 'End If'], [/^next\b/, 'Next'],
+      [/^loop\b/, 'Loop'], [/^wend\b/, 'Wend'], [/^end\s+select\b/, 'End Select']];
+    for (const raw of lines) {
+      const indent = /^[ \t]*/.exec(raw)[0];
+      const l = raw.replace(/"[^"]*"/g, '""').replace(/'.*$/, '').trim().toLowerCase();
+      if (!l || /^rem\b/.test(l)) continue;
+      const c = CLOSE.find(([re]) => re.test(l));
+      if (c) {
+        const i = stack.map((x) => x.word).lastIndexOf(c[1]);
+        if (i >= 0) stack.length = i;
+        continue;
+      }
+      const o = RULES.find(([re]) => re.test(l));
+      if (o) stack.push({ word: o[1], indent });
+    }
+    return stack[stack.length - 1] || null;
+  }
+  function updateCloser() {
+    const b = openBlock();
+    closeBtn.classList.toggle('hidden', !b);
+    if (b) { closeBtn.textContent = b.word; closeBtn.title = `„${b.word}“ einfügen (schließt den offenen Block)`; }
+  }
+  /** Schlusswort mit der Einrückung des öffnenden Blocks einfügen, wie im VBA-Editor üblich. */
+  function insertCloser() {
+    const b = openBlock();
+    if (!b) return;
+    const s = code.selectionStart;
+    const lineStart = code.value.lastIndexOf('\n', s - 1) + 1;
+    const head = code.value.slice(lineStart, s);
+    if (/^[ \t]*$/.test(head)) code.setRangeText(b.indent + b.word, lineStart, code.selectionEnd, 'end');
+    else code.setRangeText('\n' + b.indent + b.word, s, code.selectionEnd, 'end');
+    code.dispatchEvent(new Event('input'));
+  }
+  function setKeyBar(on) {
+    keyBar.classList.toggle('hidden', !on);
+    document.body.classList.toggle('keybar-on', on);
+    if (on) updateCloser();
+  }
+  code.addEventListener('focus', () => { if (touchMq.matches) setKeyBar(true); });
+  code.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== code) setKeyBar(false); }, 150));
+  code.addEventListener('input', () => { if (!keyBar.classList.contains('hidden')) updateCloser(); });
+  document.addEventListener('selectionchange', () => { if (document.activeElement === code && !keyBar.classList.contains('hidden')) updateCloser(); });
+  // Höhe der Bildschirmtastatur, damit Leiste und ▶-Knopf darüber stehen (iOS verkleinert nur den sichtbaren Bereich)
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const updateKb = () => {
+      const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      document.documentElement.style.setProperty('--kb', kb + 'px');
+    };
+    vv.addEventListener('resize', updateKb);
+    vv.addEventListener('scroll', updateKb);
+    updateKb();
+  }
+
   // ---------- Code ersetzen mit Rückgängig ----------
   const toast = $('toast'), toastText = $('toastText');
   let undoState = null, toastTimer = null;
@@ -600,7 +781,7 @@
   });
 
   // ---------- Hilfe ----------
-  const help = $('helpPanel'), helpBody = $('helpBody'), helpToc = $('helpToc'), btnHelp = $('btnHelp');
+  const helpBody = $('helpBody'), helpToc = $('helpToc');
   function buildHelp() {
     for (const t of VBAHelp.TOPICS) {
       const sec = document.createElement('section');
@@ -630,16 +811,24 @@
       helpToc.appendChild(link);
     }
   }
+  /** Hilfe-Reiter öffnen oder schließen. Kam man aus dem Formular, geht es beim Schließen dorthin zurück. */
   function toggleHelp(show) {
-    const open = show === undefined ? help.classList.contains('hidden') : show;
-    help.classList.toggle('hidden', !open);
-    btnHelp.setAttribute('aria-expanded', String(open));
+    const open = show === undefined ? sideTab !== 'help' : show;
+    if (open) {
+      if (sideTab === 'help') return;
+      helpReturn = sideTab === 'form' ? 'form' : null;
+      if (!helpReturn) formTouched = false;
+      showSide('help');
+    } else {
+      if (sideTab !== 'help') return;
+      if (helpReturn === 'form') { helpReturn = null; showSide('form'); } else closeSide();
+    }
   }
   btnHelp.addEventListener('click', () => toggleHelp());
   $('btnHelpClose').addEventListener('click', () => toggleHelp(false));
   document.addEventListener('keydown', (e) => {
     if (e.key === 'F1') { e.preventDefault(); toggleHelp(); }
-    if (e.key === 'Escape' && !help.classList.contains('hidden') && modal.classList.contains('hidden')) toggleHelp(false);
+    if (e.key === 'Escape' && sideTab === 'help' && modal.classList.contains('hidden') && !document.body.classList.contains('more-open')) toggleHelp(false);
   });
   buildHelp();
 
@@ -664,7 +853,9 @@
   formModel = savedForm && Array.isArray(savedForm.controls) ? savedForm : VBA.emptyForm();
   designer.setModel(formModel);
   setViewButtons(false);
+  const formWasVisible = store.get(FORM_VISIBLE_KEY) === '1';
+  showSide(null);
   renderGutter();
   refreshEntries();
-  if (store.get(FORM_VISIBLE_KEY) === '1') setFormVisible(true);
+  if (formWasVisible) setFormVisible(true);
 })();
